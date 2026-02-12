@@ -1,0 +1,25 @@
+# ============================================================================
+# Synapse — Club Configuration (Infrastructure Only)
+# ============================================================================
+# This file contains infrastructure and identity settings.
+# All gameplay tuning (XP, leveling, economy, anti-gaming, quality modifiers)
+# is managed from the Admin Dashboard → Settings page and stored in the
+# database.  Default values are seeded from seeds/settings.yaml on first run.
+# ============================================================================
+
+# --- Identity ---------------------------------------------------------------
+club_name: "Synapse Dev Club"
+club_motto: "Bridge the gap between chat and code."
+
+# --- Discord Bot Settings ---------------------------------------------------
+bot_prefix: "!"                  # Prefix for legacy text commands
+guild_id: 1468816181854081229    # Your Discord server ID (snowflake)
+
+# --- Dashboard --------------------------------------------------------------
+dashboard_port: 8501              # Port for the Streamlit dashboard
+
+# --- Admin ------------------------------------------------------------------
+admin_role_id: 1469180780914671803                  # Discord role ID required for admin access
+
+# --- Optional ---------------------------------------------------------------
+announce_channel_id:              # Channel ID for level-up / achievement posts (null = same channel)

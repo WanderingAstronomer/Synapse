@@ -1,0 +1,1 @@
+"""synapse.database — Database package."""

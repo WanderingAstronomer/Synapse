@@ -1,0 +1,127 @@
+# ============================================================================
+# Synapse — Default Achievement Templates (seeded on first run)
+# ============================================================================
+
+achievements:
+  # --- Early "welcome" achievements (instant feedback for new users) ---
+  - name: "Hello World"
+    description: "Send your very first message — welcome aboard!"
+    category: participation
+    requirement_type: counter_threshold
+    requirement_field: messages_sent
+    requirement_value: 1
+    rarity: common
+    xp_reward: 10
+    gold_reward: 5
+
+  - name: "Getting Started"
+    description: "Earn 25 XP — you're on your way!"
+    category: participation
+    requirement_type: xp_milestone
+    requirement_value: 25
+    rarity: common
+    xp_reward: 0
+    gold_reward: 5
+
+  - name: "First Star"
+    description: "Earn 5 total stars — your journey begins."
+    category: social
+    requirement_type: star_threshold
+    requirement_value: 5
+    rarity: common
+    xp_reward: 10
+    gold_reward: 0
+
+  # --- Main progression achievements ---
+  - name: "First Steps"
+    description: "Earn 100 XP — everyone starts somewhere!"
+    category: participation
+    requirement_type: xp_milestone
+    requirement_value: 100
+    rarity: common
+    xp_reward: 0
+
+  - name: "Rising Star"
+    description: "Earn 100 total stars."
+    category: social
+    requirement_type: star_threshold
+    requirement_value: 100
+    rarity: common
+    xp_reward: 25
+
+  - name: "Chatterbox"
+    description: "Send 100 qualifying messages."
+    category: social
+    requirement_type: counter_threshold
+    requirement_field: messages_sent
+    requirement_value: 100
+    rarity: uncommon
+    xp_reward: 50
+
+  - name: "Thousand Words"
+    description: "Send 1,000 qualifying messages."
+    category: social
+    requirement_type: counter_threshold
+    requirement_field: messages_sent
+    requirement_value: 1000
+    rarity: rare
+    xp_reward: 200
+
+  - name: "Cheerleader"
+    description: "Give 200 reactions to others' messages."
+    category: social
+    requirement_type: counter_threshold
+    requirement_field: reactions_given
+    requirement_value: 200
+    rarity: uncommon
+    xp_reward: 50
+
+  - name: "Popular"
+    description: "Receive 500 reactions from others."
+    category: social
+    requirement_type: counter_threshold
+    requirement_field: reactions_received
+    requirement_value: 500
+    rarity: rare
+    xp_reward: 100
+
+  - name: "Night Owl"
+    description: "Spend 10 hours in voice channels."
+    category: participation
+    requirement_type: counter_threshold
+    requirement_field: voice_minutes
+    requirement_value: 600
+    rarity: uncommon
+    xp_reward: 75
+
+  - name: "Committed"
+    description: "Earn 5,000 XP — you're in it for the long haul."
+    category: participation
+    requirement_type: xp_milestone
+    requirement_value: 5000
+    rarity: rare
+    xp_reward: 0
+
+  - name: "Constellation"
+    description: "Earn 1,000 total stars."
+    category: social
+    requirement_type: star_threshold
+    requirement_value: 1000
+    rarity: rare
+    xp_reward: 100
+
+  - name: "Veteran"
+    description: "Earn 50,000 XP — a true community pillar."
+    category: participation
+    requirement_type: xp_milestone
+    requirement_value: 50000
+    rarity: epic
+    xp_reward: 500
+
+  - name: "Galaxy"
+    description: "Earn 10,000 total stars."
+    category: social
+    requirement_type: star_threshold
+    requirement_value: 10000
+    rarity: epic
+    xp_reward: 250

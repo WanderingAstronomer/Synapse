@@ -1,0 +1,38 @@
+[project]
+name = "synapse"
+version = "0.1.0"
+description = "A gamified Neural Bridge for university clubs — connects Discord engagement to GitHub contributions."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "discord-py>=2.6.4",
+    "psycopg2-binary>=2.9.11",
+    "python-dotenv>=1.2.1",
+    "pyyaml>=6.0.3",
+    "requests>=2.32.0",
+    "sqlalchemy>=2.0.46",
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.34.0",
+    "python-jose[cryptography]>=3.3.0",
+    "httpx>=0.28.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+    "ruff>=0.15.0",
+    "mypy>=1.19.1",
+    "types-PyYAML>=6.0.12.20250915",
+    "types-psycopg2>=2.9.21.20251012",
+    "types-requests>=2.32.4.20260107",
+]
+
+[tool.ruff]
+line-length = 99
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]

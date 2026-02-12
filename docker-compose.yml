@@ -1,0 +1,137 @@
+# ============================================================================
+# Synapse — Docker Compose (Local Development Stack)
+# ============================================================================
+# Brings up four services that mirror the production deployment:
+#
+#   1. db        — PostgreSQL 16 (the "brain" — stores all game state)
+#   2. bot       — The Discord bot (the "nervous system" — listens to events)
+#   3. api       — FastAPI REST layer (the "spine" — serves data to the UI)
+#   4. dashboard — SvelteKit frontend (the "eyes" — visualizes the data)
+#
+# All four share the `synapse-net` network so they can reach each other
+# by service name (e.g. the bot connects to `db:5432`).
+#
+# Quick start:
+#   docker compose up --build
+#
+# Just the database (for local dev without Docker for the bot):
+#   docker compose up db
+# ============================================================================
+
+services:
+
+  # --------------------------------------------------------------------------
+  # PostgreSQL — The persistent "Game State" store.
+  # --------------------------------------------------------------------------
+  db:
+    image: postgres:16-alpine
+    container_name: synapse-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: synapse
+      POSTGRES_PASSWORD: synapse
+      POSTGRES_DB: synapse
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U synapse"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - synapse-net
+
+  # --------------------------------------------------------------------------
+  # Synapse Bot — The Discord event processor.
+  # --------------------------------------------------------------------------
+  bot:
+    build: .
+    container_name: synapse-bot
+    restart: unless-stopped
+    command: ["python", "-m", "synapse.bot"]
+    env_file: .env
+    environment:
+      # Override DATABASE_URL to point at the Compose `db` service.
+      DATABASE_URL: postgresql+psycopg2://synapse:synapse@db:5432/synapse
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - synapse-net
+    # --- Docker Compose Watch (live-reload during dev) --------------------
+    develop:
+      watch:
+        - action: sync
+          path: ./synapse
+          target: /app/synapse
+          ignore:
+            - __pycache__/
+        - action: sync
+          path: ./config.yaml
+          target: /app/config.yaml
+        - action: rebuild
+          path: ./pyproject.toml
+
+  # --------------------------------------------------------------------------
+  # FastAPI — REST API for the dashboard frontend.
+  # --------------------------------------------------------------------------
+  api:
+    build: .
+    container_name: synapse-api
+    restart: unless-stopped
+    command: ["python", "-m", "uvicorn", "synapse.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg2://synapse:synapse@db:5432/synapse
+      JWT_SECRET: ${JWT_SECRET:-synapse-dev-secret-change-me}
+      DISCORD_REDIRECT_URI: http://localhost:3000/auth/callback
+      FRONTEND_URL: http://localhost:3000
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - synapse-net
+    develop:
+      watch:
+        - action: sync
+          path: ./synapse
+          target: /app/synapse
+          ignore:
+            - __pycache__/
+        - action: rebuild
+          path: ./pyproject.toml
+
+  # --------------------------------------------------------------------------
+  # SvelteKit Dashboard — Modern frontend UI.
+  # --------------------------------------------------------------------------
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+    container_name: synapse-dashboard
+    restart: unless-stopped
+    environment:
+      ORIGIN: http://localhost:3000
+      BODY_SIZE_LIMIT: Infinity
+      API_BASE_URL: http://api:8000/api
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+    networks:
+      - synapse-net
+
+# ---------------------------------------------------------------------------
+# Shared resources
+# ---------------------------------------------------------------------------
+volumes:
+  pgdata:
+    driver: local
+
+networks:
+  synapse-net:
+    driver: bridge
