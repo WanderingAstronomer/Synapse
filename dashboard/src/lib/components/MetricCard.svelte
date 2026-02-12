@@ -28,7 +28,7 @@
 	};
 </script>
 
-<div class="card card-hover ring-1 {ringColors[color]} animate-fade-in">
+<div class="card card-hover ring-1 {ringColors[color]} animate-fade-in group cursor-default">
 	<div class="flex items-start justify-between">
 		<div>
 			<p class="text-xs font-medium text-zinc-500 uppercase tracking-wider">{label}</p>
@@ -39,7 +39,7 @@
 				</p>
 			{/if}
 		</div>
-		<div class="w-10 h-10 rounded-xl flex items-center justify-center text-lg {iconBgs[color]}">
+		<div class="w-10 h-10 rounded-xl flex items-center justify-center text-lg {iconBgs[color]} transition-transform duration-300 group-hover:scale-110">
 			{icon}
 		</div>
 	</div>

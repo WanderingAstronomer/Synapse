@@ -33,6 +33,7 @@ from sqlalchemy import Engine
 
 from synapse.config import SynapseConfig
 from synapse.engine.cache import ConfigCache
+from synapse.services.event_lake_writer import EventLakeWriter
 
 logger = logging.getLogger(__name__)
 
@@ -42,8 +43,10 @@ EXTENSIONS: list[str] = [
     "synapse.bot.cogs.reactions",
     "synapse.bot.cogs.voice",
     "synapse.bot.cogs.threads",
+    "synapse.bot.cogs.membership",
     "synapse.bot.cogs.meta",
     "synapse.bot.cogs.admin",
+    "synapse.bot.cogs.tasks",
 ]
 
 # Name of the auto-created achievements channel
@@ -62,14 +65,18 @@ class SynapseBot(commands.Bot):
     """
 
     def __init__(self, cfg: SynapseConfig, engine: Engine, cache: ConfigCache) -> None:
-        # --- Intents --------------------------------------------------------
-        # message_content is REQUIRED for prefix commands and on_message XP.
-        # members is needed to resolve Member objects in slash commands.
-        # voice_states for voice XP tracking.
+        # --- Intents (§3B.2) ------------------------------------------------
+        # Standard intents included in default():
+        #   GUILDS, GUILD_MESSAGES, GUILD_MESSAGE_REACTIONS, GUILD_VOICE_STATES
+        # Privileged intents (must enable in Developer Portal):
+        #   MESSAGE_CONTENT — quality analysis (length, code, links)
+        #   GUILD_MEMBERS   — join/leave tracking, member cache
+        # Explicitly disabled:
+        #   GUILD_PRESENCES — bandwidth bomb, no engagement value
         intents = discord.Intents.default()
-        intents.message_content = True
-        intents.members = True
-        intents.voice_states = True
+        intents.message_content = True    # Privileged: quality analysis
+        intents.members = True            # Privileged: join/leave tracking
+        intents.presences = False         # Explicitly disabled: too expensive
 
         super().__init__(
             command_prefix=cfg.bot_prefix,
@@ -81,6 +88,9 @@ class SynapseBot(commands.Bot):
         self.cfg = cfg
         self.engine = engine
         self.cache = cache
+
+        # Event Lake writer (P4) — shared by all cogs for event capture
+        self.lake_writer = EventLakeWriter(engine)
 
         # Will be set in on_ready after auto-creating the achievements channel
         self.synapse_announce_channel_id: int | None = None
@@ -123,6 +133,9 @@ class SynapseBot(commands.Bot):
 
         # --- Auto-discover guild channels and map to zones ------------------
         await self._auto_discover_channels()
+
+        # --- Detect AFK voice channels for Event Lake tagging ---------------
+        await self._detect_afk_channels()
 
         # --- Start announcement throttle drain task -------------------------
         from synapse.services.announcement_service import start_queue
@@ -219,3 +232,24 @@ class SynapseBot(commands.Bot):
                         "Auto-discovered %d channels, cache reloaded.", mapped
                     )
             return  # Only process the primary guild
+
+    # -----------------------------------------------------------------------
+    # Detect AFK voice channels for Event Lake tagging (P4, §3B.4)
+    # -----------------------------------------------------------------------
+    async def _detect_afk_channels(self) -> None:
+        """Auto-detect Discord's built-in AFK channel and update the lake writer."""
+        afk_ids: set[int] = set()
+        for g in self.guilds:
+            if g.id != self.cfg.guild_id:
+                continue
+            if g.afk_channel:
+                afk_ids.add(g.afk_channel.id)
+                logger.info(
+                    "Detected AFK channel: #%s (ID: %d)",
+                    g.afk_channel.name, g.afk_channel.id,
+                )
+            # TODO: Also load admin-designated non-tracked channels from settings
+            break
+
+        self.lake_writer.set_afk_channels(afk_ids)
+        logger.info("Event Lake AFK channel set: %s", afk_ids or "(none)")

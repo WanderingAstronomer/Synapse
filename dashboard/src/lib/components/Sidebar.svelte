@@ -14,6 +14,7 @@
 		{ href: '/admin/zones', label: 'Zones', icon: '🗺️' },
 		{ href: '/admin/achievements', label: 'Achievements', icon: '🎖️' },
 		{ href: '/admin/awards', label: 'Awards', icon: '🎁' },
+		{ href: '/admin/data-sources', label: 'Event Lake', icon: '🗄️' },
 		{ href: '/admin/settings', label: 'Settings', icon: '⚙️' },
 		{ href: '/admin/audit', label: 'Audit Log', icon: '📋' },
 	];
@@ -66,7 +67,7 @@
 		<!-- Brand -->
 		<div class="px-5 py-5 border-b border-surface-300">
 			<div class="flex items-center gap-2">
-				<span class="text-xl">⚡</span>
+				<span class="text-xl animate-pulse-slow">⚡</span>
 				<span class="text-lg font-bold text-white tracking-tight">Synapse</span>
 			</div>
 			<p class="text-xs text-zinc-500 mt-1">Dashboard</p>

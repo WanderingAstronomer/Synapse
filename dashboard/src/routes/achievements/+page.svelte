@@ -4,6 +4,8 @@
 	import RarityBadge from '$lib/components/RarityBadge.svelte';
 	import Avatar from '$lib/components/Avatar.svelte';
 	import EmptyState from '$lib/components/EmptyState.svelte';
+	import ProgressBar from '$lib/components/ProgressBar.svelte';
+	import SynapseLoader from '$lib/components/SynapseLoader.svelte';
 	import { fmt, timeAgo, capitalize } from '$lib/utils';
 
 	let achievements = $state<Achievement[]>([]);
@@ -38,12 +40,27 @@
 		})
 	);
 
-	const RARITY_GLOW: Record<string, string> = {
-		legendary: 'shadow-amber-500/20 border-amber-500/30',
-		epic: 'shadow-purple-500/20 border-purple-500/30',
-		rare: 'shadow-blue-500/20 border-blue-500/30',
-		uncommon: 'shadow-green-500/20 border-green-500/30',
-		common: '',
+	const RARITY_BORDER: Record<string, string> = {
+		legendary: 'rarity-legendary',
+		epic: 'rarity-epic',
+		rare: 'rarity-rare',
+		uncommon: 'rarity-uncommon',
+		common: 'rarity-common',
+	};
+
+	const RARITY_ICON_BG: Record<string, string> = {
+		legendary: 'bg-amber-500/15 border-amber-500/30',
+		epic: 'bg-purple-500/15 border-purple-500/30',
+		rare: 'bg-blue-500/15 border-blue-500/30',
+		uncommon: 'bg-emerald-500/15 border-emerald-500/30',
+		common: 'bg-zinc-500/10 border-zinc-500/20',
+	};
+
+	const CATEGORY_ICONS: Record<string, string> = {
+		social: '💬',
+		coding: '💻',
+		engagement: '🔥',
+		special: '✨',
 	};
 </script>
 
@@ -56,39 +73,39 @@
 
 {#if loading}
 	<div class="flex items-center justify-center h-48">
-		<div class="w-8 h-8 border-2 border-brand-500 border-t-transparent rounded-full animate-spin"></div>
+		<SynapseLoader text="Loading achievements..." />
 	</div>
 {:else}
 	<!-- Filters -->
 	<div class="flex flex-wrap gap-2 mb-6">
 		<button
-			class="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors
-				{!categoryFilter ? 'bg-brand-600 text-white' : 'bg-surface-200 text-zinc-400 hover:text-zinc-200'}"
+			class="px-3 py-1.5 rounded-lg text-xs font-medium transition-all
+				{!categoryFilter ? 'bg-brand-600 text-white shadow-lg shadow-brand-500/20' : 'bg-surface-200 text-zinc-400 hover:text-zinc-200'}"
 			onclick={() => (categoryFilter = '')}
 		>
 			All Categories
 		</button>
 		{#each categories as cat}
 			<button
-				class="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors
-					{categoryFilter === cat ? 'bg-brand-600 text-white' : 'bg-surface-200 text-zinc-400 hover:text-zinc-200'}"
+				class="px-3 py-1.5 rounded-lg text-xs font-medium transition-all
+					{categoryFilter === cat ? 'bg-brand-600 text-white shadow-lg shadow-brand-500/20' : 'bg-surface-200 text-zinc-400 hover:text-zinc-200'}"
 				onclick={() => (categoryFilter = cat)}
 			>
-				{capitalize(cat)}
+				{CATEGORY_ICONS[cat] || '📦'} {capitalize(cat)}
 			</button>
 		{/each}
 		<div class="w-px bg-surface-400 mx-1"></div>
 		<button
-			class="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors
-				{!rarityFilter ? 'bg-brand-600 text-white' : 'bg-surface-200 text-zinc-400 hover:text-zinc-200'}"
+			class="px-3 py-1.5 rounded-lg text-xs font-medium transition-all
+				{!rarityFilter ? 'bg-brand-600 text-white shadow-lg shadow-brand-500/20' : 'bg-surface-200 text-zinc-400 hover:text-zinc-200'}"
 			onclick={() => (rarityFilter = '')}
 		>
 			All Rarities
 		</button>
 		{#each rarities as rar}
 			<button
-				class="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors
-					{rarityFilter === rar ? 'bg-brand-600 text-white' : 'bg-surface-200 text-zinc-400 hover:text-zinc-200'}"
+				class="px-3 py-1.5 rounded-lg text-xs font-medium transition-all
+					{rarityFilter === rar ? 'bg-brand-600 text-white shadow-lg shadow-brand-500/20' : 'bg-surface-200 text-zinc-400 hover:text-zinc-200'}"
 				onclick={() => (rarityFilter = rar)}
 			>
 				{capitalize(rar)}
@@ -102,29 +119,42 @@
 		<!-- Achievement Grid -->
 		<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
 			{#each filtered as ach (ach.id)}
-				<div class="card card-hover {RARITY_GLOW[ach.rarity] || ''} shadow-lg animate-fade-in">
-					<div class="flex items-start justify-between mb-3">
-						<div>
-							<h3 class="text-sm font-semibold text-white">{ach.name}</h3>
+				<div class="card card-hover {RARITY_BORDER[ach.rarity] || ''} group hover:scale-[1.02] transition-all duration-200 animate-fade-in">
+					<div class="flex items-start gap-3 mb-3">
+						<!-- Badge icon -->
+						<div class="w-12 h-12 rounded-xl border flex items-center justify-center flex-shrink-0 {RARITY_ICON_BG[ach.rarity] || RARITY_ICON_BG.common}">
+							{#if ach.badge_image_url}
+								<img src={ach.badge_image_url} alt={ach.name} class="w-8 h-8 object-contain" />
+							{:else}
+								<span class="text-2xl">{CATEGORY_ICONS[ach.category] || '🏅'}</span>
+							{/if}
+						</div>
+						<div class="flex-1 min-w-0">
+							<h3 class="text-sm font-semibold text-white group-hover:text-brand-300 transition-colors">{ach.name}</h3>
 							{#if ach.description}
 								<p class="text-xs text-zinc-500 mt-0.5 line-clamp-2">{ach.description}</p>
 							{/if}
 						</div>
-						<RarityBadge rarity={ach.rarity} color={ach.rarity_color} />
+						<RarityBadge rarity={ach.rarity} />
 					</div>
 
-					<div class="flex items-center gap-4 text-xs text-zinc-400">
+					<!-- Rewards -->
+					<div class="flex items-center gap-3 text-xs mb-3">
 						{#if ach.xp_reward > 0}
-							<span class="text-brand-400">✨ {fmt(ach.xp_reward)} XP</span>
+							<span class="text-brand-400 font-medium">✨ {fmt(ach.xp_reward)} XP</span>
 						{/if}
 						{#if ach.gold_reward > 0}
-							<span class="text-gold-400">🪙 {fmt(ach.gold_reward)}</span>
+							<span class="text-gold-400 font-medium">🪙 {fmt(ach.gold_reward)}</span>
 						{/if}
 					</div>
 
-					<div class="mt-3 pt-3 border-t border-surface-300 flex items-center justify-between text-xs text-zinc-500">
-						<span>{ach.earner_count} earned</span>
-						<span>{ach.earn_pct}% of members</span>
+					<!-- Earn rate bar -->
+					<div class="pt-3 border-t border-surface-300/50">
+						<div class="flex items-center justify-between text-xs text-zinc-500 mb-1.5">
+							<span>{ach.earner_count} earned</span>
+							<span>{ach.earn_pct}%</span>
+						</div>
+						<ProgressBar value={ach.earn_pct / 100} height={4} />
 					</div>
 				</div>
 			{/each}
@@ -137,11 +167,12 @@
 			<h2 class="text-sm font-semibold text-zinc-300 mb-4">🎉 Recently Earned</h2>
 			<div class="space-y-2">
 				{#each recent as r}
-					<div class="flex items-center gap-3 p-2 rounded-lg hover:bg-surface-200/50 transition-colors">
+					<div class="flex items-center gap-3 p-2.5 rounded-lg hover:bg-surface-200/50 transition-all hover:scale-[1.01]">
 						<Avatar src={r.avatar_url} size={28} />
 						<span class="text-sm text-zinc-300">{r.user_name}</span>
 						<span class="text-xs text-zinc-500">earned</span>
 						<span class="text-sm font-medium" style="color: {r.rarity_color}">{r.achievement_name}</span>
+						<RarityBadge rarity={r.achievement_rarity} />
 						<span class="ml-auto text-xs text-zinc-500">{timeAgo(r.earned_at)}</span>
 					</div>
 				{/each}

@@ -2,7 +2,9 @@
 synapse.engine.reward — Reward Calculation Pipeline
 =====================================================
 
-Pure calculation pipeline per 05_REWARD_ENGINE.md.
+Pure calculation pipeline (originally per 05_REWARD_ENGINE.md,
+now documented in 05_RULES_ENGINE.md).  Will be replaced by the
+configurable Rules Engine in P6.
 No Discord I/O, no DB I/O inside the engine.
 
 Pipeline stages:

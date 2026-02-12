@@ -299,7 +299,7 @@ def get_public_settings(session: Session = Depends(get_session)):
         result[r.key] = _setting_val(r)
 
     # Defaults
-    result.setdefault("dashboard_title", "Synapse Club Pulse")
+    result.setdefault("dashboard_title", "Synapse Community Dashboard")
     result.setdefault("dashboard_subtitle", "Community engagement at a glance")
     result.setdefault("dashboard_leaderboard_page_size", 20)
     result.setdefault("dashboard_activity_default_days", 30)

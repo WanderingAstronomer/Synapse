@@ -58,7 +58,7 @@ T = TypeVar("T")
 def create_db_engine() -> Engine:
     """Build a SQLAlchemy :class:`Engine` from the ``DATABASE_URL`` env var.
 
-    The connection pool is sized for a small-to-medium club bot:
+    The connection pool is sized for a small-to-medium community bot:
     * ``pool_size=5`` — five persistent connections.
     * ``max_overflow=10`` — up to 10 extra connections under load.
 

@@ -42,7 +42,7 @@ The existing codebase implements the Phase 0 foundation:
 | No shared service layer for admin mutations | 07 §7.9 | Critical |
 | No idempotent event persistence (ON CONFLICT DO NOTHING) | 04 §4.3, D04-07 | Critical |
 | No Discord OAuth for admin dashboard | 07 §7.8 | High |
-| No Club Pulse public pages (achievement gallery, full leaderboard) | 07 §7.7 | High |
+| No Community Dashboard public pages (achievement gallery, full leaderboard) | 07 §7.7 | High |
 | No admin CRUD pages (zones, achievements, manual awards) | 07 §7.4-7.6 | High |
 | No seed script for default zones/multipliers/achievements | 04 D04-01 | Medium |
 | No tests | — | High |
@@ -94,7 +94,7 @@ The existing codebase implements the Phase 0 foundation:
 | Reward Engine | `events.py`, `reward.py`, `achievements.py`, `cache.py` | ✅ Complete |
 | Service Layer | `reward_service.py`, `admin_service.py`, `seed.py` | ✅ Complete |
 | Bot Cogs | `social.py`, `reactions.py`, `voice.py`, `meta.py`, `admin.py` | ✅ Complete |
-| Dashboard | `app.py` (Club Pulse + Admin) | ✅ Complete → Superseded by Milestone 2 |
+| Dashboard | `app.py` (Community Dashboard + Admin) | ✅ Complete → Superseded by Milestone 2 |
 | Tests | `test_reward_engine.py`, `test_achievements.py`, `test_anti_gaming.py`, `test_cache.py` | ✅ Complete |
 | Config | `config.yaml`, `config.py`, `pyproject.toml` | ✅ Updated |
 | Documentation | `README.md`, `IMPLEMENTATION_DECISIONS.md`, `REQUIREMENTS_TRACE.md` | ✅ Complete |
@@ -204,4 +204,74 @@ limitations as blockers:
 1. **JWT secret rotation** — No built-in key rotation. Changing `JWT_SECRET` invalidates all active sessions. Acceptable for current scale.
 2. **localStorage XSS risk** — JWT in localStorage is vulnerable to XSS. Mitigated by Content-Security-Policy headers (future) and no user-generated HTML rendering.
 3. **Vite proxy in dev only** — The `/api` proxy only works in Vite dev mode. Production uses Docker networking (dashboard → api on shared bridge).
+
+---
+
+## Milestone 3: v4.0 Platform Pivot (2026-02-12)
+
+### Context
+
+The working v3.0 system (P0–P3.5 complete) is a functional **gamified
+engagement bot for student clubs**.  However, the hardcoded assumption
+that every community is a student club limits adoption.  The v4.0 pivot
+transforms Synapse into a **modular community operating system** that
+works for any Discord-centric community.
+
+### What's Changing
+
+| Aspect | v3.0 (Current) | v4.0 (Planned) |
+|--------|----------------|-----------------|
+| Identity | Student club gamification bot | Modular community OS |
+| Currencies | Hardcoded XP, Stars, Gold | Admin-defined via Ledger |
+| Reward logic | Python pipeline in `reward.py` | JSON rules in database |
+| Achievements | `user_stats` column checks | Wallet + Event Lake queries |
+| Terminology | Fixed (XP, Stars, Zones) | Configurable (Taxonomy system) |
+| Configurability | Settings key-value pairs | Modules + Rules + Presets |
+| Event data | `activity_log` (derived) | Event Lake (raw capture) |
+
+### What's Preserved
+
+- Four-service topology (db, bot, api, dashboard)
+- Technology stack (Python, SvelteKit, PostgreSQL, FastAPI)
+- All dashboard UI work from P3.5 (cyber-industrial aesthetic)
+- Auth model (Discord OAuth → JWT)
+- PG LISTEN/NOTIFY cache strategy
+- Docker Compose deployment
+- Audit logging pattern
+
+### New Design Documents Written
+
+| Document | Replaces | Summary |
+|----------|----------|---------|
+| `01_VISION.md` | v3.0 Vision | Community OS philosophy, deployment archetypes, taxonomy |
+| `03_CONFIGURABLE_ECONOMY.md` | `03_DUAL_ECONOMY.md` | Ledger abstraction: currencies, wallets, transactions |
+| `05_RULES_ENGINE.md` | `05_REWARD_ENGINE.md` | Trigger/condition/effect rules, presets, amount expressions |
+| `06_MILESTONES.md` | `06_ACHIEVEMENTS.md` | Requirements against wallets + Event Lake |
+| `09_ROADMAP.md` | v3.0 Roadmap | P4–P10 plan for platform pivot |
+| `03B_DATA_LAKE.md` | (new) | Event Lake stub, pending research |
+
+### Key Design Decisions
+
+1. **Three Pillars** — Event Lake → Ledger → Rules Engine.  Design
+   simultaneously, build sequentially (P4 → P5 → P6).
+2. **No Migration Needed** — No production data.  Clean pivot.
+3. **Incremental Transition** — Old code runs alongside new code behind
+   feature flags.  No big-bang rewrite.
+4. **Presets for Zero-Config** — Classic Gamification preset reproduces
+   v3.0 behavior exactly.  New communities can start with any preset.
+5. **Safety Rails Remain Hardcoded** — Self-interaction filter, transaction
+   rate limits, and balance overflow protection are not configurable.
+6. **The Vacuum Approach** — Capture ephemeral gateway events, not all
+   data.  Static data is fetched via Discord REST API on demand.
+
+### Research Dependencies
+
+A Discord Gateway audit research prompt was prepared to determine:
+- Exact gateway event payloads and privileged intent requirements
+- Which events are ephemeral vs. fetchable via REST
+- Storage volume estimates for Event Lake sizing
+- discord.py-specific event handler naming and payload shapes
+
+Results will inform the Event Lake schema (03B_DATA_LAKE.md) and the
+exact list of toggleable data sources.
 

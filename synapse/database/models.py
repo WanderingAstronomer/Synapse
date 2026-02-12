@@ -5,7 +5,7 @@ synapse.database.models — SQLAlchemy 2.0 Data Models
 Complete schema implementation per 04_DATABASE_SCHEMA.md.
 
 Tables:
-- users              — Club member profiles (Discord snowflake PK)
+- users              — Community member profiles (Discord snowflake PK)
 - user_stats         — Per-season engagement counters
 - seasons            — Competitive windows
 - activity_log       — Append-only event journal with idempotent insert
@@ -53,7 +53,7 @@ class Base(DeclarativeBase):
 # Enums
 # ---------------------------------------------------------------------------
 class InteractionType(enum.StrEnum):
-    """All event types that flow through the reward engine."""
+    """All event types that flow through the reward pipeline."""
     MESSAGE = "MESSAGE"
     REACTION_GIVEN = "REACTION_GIVEN"
     REACTION_RECEIVED = "REACTION_RECEIVED"
@@ -461,3 +461,73 @@ class Setting(Base):
 
     def __repr__(self) -> str:
         return f"<Setting key={self.key!r} category={self.category!r}>"
+
+
+# ---------------------------------------------------------------------------
+# EventLake — append-only ephemeral event capture (P4)
+# ---------------------------------------------------------------------------
+class EventLake(Base):
+    """Append-only table capturing ephemeral Discord gateway events.
+
+    See 03B_DATA_LAKE.md §3B.3 for full schema rationale.
+    Events are immutable once written.  Retention managed by periodic cleanup.
+    """
+    __tablename__ = "event_lake"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    guild_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    user_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    channel_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    target_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default="{}")
+    source_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    timestamp: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False,
+    )
+
+    __table_args__ = (
+        Index("idx_event_lake_user_ts", "user_id", timestamp.desc()),
+        Index("idx_event_lake_type_ts", "event_type", timestamp.desc()),
+        Index("idx_event_lake_guild_ts", "guild_id", timestamp.desc()),
+        Index(
+            "idx_event_lake_channel_ts", "channel_id", timestamp.desc(),
+            postgresql_where=channel_id.isnot(None),
+        ),
+        # Idempotency: prevent duplicate events from bot restarts / replays
+        Index(
+            "idx_event_lake_source", "source_id",
+            unique=True,
+            postgresql_where=source_id.isnot(None),
+        ),
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<EventLake id={self.id} type={self.event_type!r} "
+            f"user={self.user_id} ts={self.timestamp}>"
+        )
+
+
+# ---------------------------------------------------------------------------
+# EventCounter — pre-computed aggregation cache (P4)
+# ---------------------------------------------------------------------------
+class EventCounter(Base):
+    """Pre-computed event counters for O(1) reads by the Rules Engine.
+
+    See 03B_DATA_LAKE.md §3B.6 for design rationale.
+    Updated transactionally with each Event Lake insert.
+    """
+    __tablename__ = "event_counters"
+
+    user_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    event_type: Mapped[str] = mapped_column(String(64), primary_key=True)
+    zone_id: Mapped[int] = mapped_column(Integer, primary_key=True, default=0)
+    period: Mapped[str] = mapped_column(String(16), primary_key=True)
+    count: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+
+    def __repr__(self) -> str:
+        return (
+            f"<EventCounter user={self.user_id} type={self.event_type!r} "
+            f"zone={self.zone_id} period={self.period!r} count={self.count}>"
+        )

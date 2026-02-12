@@ -60,6 +60,29 @@ class Social(commands.Cog, name="Social"):
             },
         )
 
+    def _write_lake_event(self, message: discord.Message) -> bool:
+        """Write message_create event to the Event Lake (P4).
+
+        Privacy: content is processed in-memory for metadata extraction
+        and never persisted — only numerical/boolean metadata is stored.
+        """
+        ref = message.reference
+        is_reply = ref is not None and ref.message_id is not None
+        reply_to_user_id: int | None = None
+        if is_reply and ref.resolved and hasattr(ref.resolved, "author"):
+            reply_to_user_id = ref.resolved.author.id
+
+        return self.bot.lake_writer.write_message_create(
+            guild_id=message.guild.id if message.guild else 0,
+            user_id=message.author.id,
+            channel_id=message.channel.id,
+            message_id=message.id,
+            content=message.content,
+            attachment_count=len(message.attachments),
+            is_reply=is_reply,
+            reply_to_user_id=reply_to_user_id,
+        )
+
     def _process(self, event: SynapseEvent, display_name: str):
         """Sync wrapper for process_event (runs on background thread)."""
         return process_event(
@@ -110,7 +133,12 @@ class Social(commands.Cog, name="Social"):
             return
         self._cooldowns[cooldown_key] = now
 
-        # Build event and process
+        # --- Event Lake capture (P4) ----------------------------------------
+        # Write to the Event Lake first (parallel with reward pipeline).
+        # Content is processed in-memory and discarded — never persisted.
+        await run_db(self._write_lake_event, message)
+
+        # Build event and process (reward pipeline — will be replaced by Rules Engine in P6)
         event = self._build_message_event(message)
         result, was_duplicate = await run_db(
             self._process,

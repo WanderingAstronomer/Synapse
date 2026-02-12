@@ -9,12 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### 🎉 Initial Release
 
-Project Synapse 1.0 is a production-ready gamified engagement framework for university clubs, transforming Discord activity into meaningful recognition through XP, Stars, Gold, achievements, and seasonal progression.
+Project Synapse 1.0 is a production-ready gamified engagement framework for Discord communities, transforming Discord activity into meaningful recognition through XP, Stars, Gold, achievements, and seasonal progression.
 
 ### Added
 
 #### Core Systems
-- **Dual Economy**: XP for progression, Stars for social recognition, Gold for rewards
+- **Economy**: XP for progression, Stars for social recognition, Gold for rewards
 - **Zone-Based Multipliers**: Per-channel grouping with customizable XP and Star multipliers for each event type
 - **Intelligent Reward Engine**: Quality-weighted message XP based on length, code blocks, links, and attachments
 - **Seasonal Stats**: Separate lifetime and seasonal tracking with automatic season rollover
@@ -62,7 +62,7 @@ Project Synapse 1.0 is a production-ready gamified engagement framework for univ
 - **Rate Limiting**: 30 mutations/minute per admin session
 
 #### Dashboard (SvelteKit + Tailwind + Chart.js)
-- **Club Pulse (Public)**:
+- **Community Dashboard (Public)**:
   - Hero banner with live metrics and animated counters
   - Multi-tab leaderboard (XP, Gold, Level) with Discord avatars and progress bars
   - Interactive Chart.js stacked bar chart showing daily event breakdown
@@ -90,7 +90,7 @@ Project Synapse 1.0 is a production-ready gamified engagement framework for univ
   - Idempotent event insertion (ON CONFLICT DO NOTHING)
 
 #### Configuration & Infrastructure
-- YAML-based configuration (`config.yaml`) for club-specific settings
+- YAML-based configuration (`config.yaml`) for community-specific settings
 - Environment variable support (`.env` with `.env.example` template)
 - Docker Compose orchestration (4 services: db, bot, api, dashboard)
 - Seed data system for achievements, settings, and zones
@@ -120,7 +120,7 @@ Project Synapse 1.0 is a production-ready gamified engagement framework for univ
 
 ### Documentation
 - Comprehensive README with architecture diagrams, setup instructions, and API overview
-- Design documents covering vision, architecture, dual economy, database schema, reward engine, achievements, admin panel, and deployment
+- Design documents covering vision, architecture, configurable economy, database schema, reward engine, achievements, admin panel, and deployment
 - Implementation decisions and requirements trace documents
 - Seed data templates for achievements, settings, and zones
 

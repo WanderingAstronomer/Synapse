@@ -5,6 +5,7 @@
 	import RarityBadge from '$lib/components/RarityBadge.svelte';
 	import EmptyState from '$lib/components/EmptyState.svelte';
 	import { capitalize } from '$lib/utils';
+	import SynapseLoader from '$lib/components/SynapseLoader.svelte';
 
 	let achievements = $state<AdminAchievement[]>([]);
 	let loading = $state(true);
@@ -155,7 +156,7 @@
 
 {#if loading}
 	<div class="flex items-center justify-center h-48">
-		<div class="w-8 h-8 border-2 border-brand-500 border-t-transparent rounded-full animate-spin"></div>
+		<SynapseLoader text="Loading achievements..." />
 	</div>
 {:else if achievements.length === 0}
 	<EmptyState icon="🎖️" title="No achievements" description="Create your first achievement template." />
@@ -174,7 +175,7 @@
 			</thead>
 			<tbody>
 				{#each achievements as a (a.id)}
-					<tr class="border-b border-surface-300/50 hover:bg-surface-200/50 {!a.active ? 'opacity-50' : ''}">
+					<tr class="border-b border-surface-300/50 hover:bg-surface-200/50 transition-all duration-150 {!a.active ? 'opacity-50' : ''}">
 						<td class="px-4 py-3">
 							<p class="font-medium text-zinc-200">{a.name}</p>
 							{#if a.description}

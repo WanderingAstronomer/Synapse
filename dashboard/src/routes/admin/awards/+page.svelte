@@ -90,15 +90,15 @@
 <!-- Tabs -->
 <div class="flex gap-2 mb-6">
 	<button
-		class="px-4 py-2 rounded-lg text-sm font-medium transition-colors
-			{tab === 'xp-gold' ? 'bg-brand-600 text-white' : 'bg-surface-200 text-zinc-400 hover:text-zinc-200'}"
+		class="px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 hover:scale-[1.03] active:scale-[0.97]
+			{tab === 'xp-gold' ? 'bg-brand-600 text-white shadow-md shadow-brand-600/30' : 'bg-surface-200 text-zinc-400 hover:text-zinc-200'}"
 		onclick={() => (tab = 'xp-gold')}
 	>
 		✨ XP & Gold
 	</button>
 	<button
-		class="px-4 py-2 rounded-lg text-sm font-medium transition-colors
-			{tab === 'achievement' ? 'bg-brand-600 text-white' : 'bg-surface-200 text-zinc-400 hover:text-zinc-200'}"
+		class="px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 hover:scale-[1.03] active:scale-[0.97]
+			{tab === 'achievement' ? 'bg-brand-600 text-white shadow-md shadow-brand-600/30' : 'bg-surface-200 text-zinc-400 hover:text-zinc-200'}"
 		onclick={() => (tab = 'achievement')}
 	>
 		🏅 Achievement
@@ -120,7 +120,7 @@
 			<div class="absolute z-10 top-full left-0 right-0 mt-1 bg-surface-100 border border-surface-300 rounded-lg shadow-xl overflow-hidden">
 				{#each searchResults as u}
 					<button
-						class="w-full flex items-center gap-3 px-3 py-2 hover:bg-surface-200 transition-colors text-left"
+					class="w-full flex items-center gap-3 px-3 py-2 hover:bg-surface-200 transition-all duration-150 text-left hover:pl-4"
 						onclick={() => selectUser(u)}
 					>
 						<span class="text-sm text-zinc-200">{u.discord_name}</span>

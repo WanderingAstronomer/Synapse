@@ -56,6 +56,26 @@ class Reactions(commands.Cog, name="Reactions"):
                 payload.message_id, payload.user_id,
             )
 
+    @commands.Cog.listener()
+    async def on_raw_reaction_remove(self, payload: discord.RawReactionActionEvent) -> None:
+        """Fire when any reaction is removed — Event Lake capture only (P4)."""
+        try:
+            if payload.guild_id is None:
+                return
+            await run_db(
+                self.bot.lake_writer.write_reaction_remove,
+                guild_id=payload.guild_id,
+                user_id=payload.user_id,
+                channel_id=payload.channel_id,
+                message_id=payload.message_id,
+                emoji_name=str(payload.emoji),
+            )
+        except Exception:
+            logger.exception(
+                "Error processing reaction remove on message %s from user %s",
+                payload.message_id, payload.user_id,
+            )
+
     async def _handle_reaction(self, payload: discord.RawReactionActionEvent) -> None:
         """Inner reaction handler (separated for error isolation)."""
 
@@ -66,6 +86,19 @@ class Reactions(commands.Cog, name="Reactions"):
         # Gate: Ignore DMs
         if payload.guild_id is None:
             return
+
+        # --- Event Lake capture (P4) ----------------------------------------
+        # Write reaction_add to the Event Lake via raw event (§3B.10).
+        # message_author_id resolved below if possible.
+        await run_db(
+            self.bot.lake_writer.write_reaction_add,
+            guild_id=payload.guild_id,
+            user_id=payload.user_id,
+            channel_id=payload.channel_id,
+            message_id=payload.message_id,
+            emoji_name=str(payload.emoji),
+            message_author_id=None,  # Resolved below for reward pipeline
+        )
 
         # Resolve the channel for announcements
         channel = self.bot.get_channel(payload.channel_id)

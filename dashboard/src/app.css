@@ -24,33 +24,36 @@
 
 @layer components {
 	.card {
-		@apply bg-surface-100 border border-surface-300 rounded-xl p-5 transition-all duration-200;
+		@apply bg-surface-100 border border-surface-300 rounded-xl p-5
+			transition-all duration-200 shadow-lg shadow-black/20;
 	}
 	.card-hover:hover {
-		@apply border-brand-500/30 shadow-lg shadow-brand-500/5;
+		@apply border-brand-500/30 shadow-xl shadow-brand-500/5 -translate-y-0.5;
 	}
 
 	.btn-primary {
 		@apply inline-flex items-center gap-2 px-4 py-2 rounded-lg
 			bg-brand-600 hover:bg-brand-500 text-white font-medium
-			transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed;
+			transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed
+			hover:shadow-lg hover:shadow-brand-500/20 active:scale-[0.98];
 	}
 	.btn-secondary {
 		@apply inline-flex items-center gap-2 px-4 py-2 rounded-lg
 			bg-surface-300 hover:bg-surface-400 text-zinc-200 font-medium
-			transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed;
+			transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed
+			active:scale-[0.98];
 	}
 	.btn-danger {
 		@apply inline-flex items-center gap-2 px-4 py-2 rounded-lg
 			bg-red-600/20 hover:bg-red-600/40 text-red-400 font-medium border border-red-600/30
-			transition-colors duration-150;
+			transition-all duration-150 hover:shadow-lg hover:shadow-red-500/10 active:scale-[0.98];
 	}
 
 	.input {
 		@apply w-full px-3 py-2 rounded-lg bg-surface-200 border border-surface-400
 			text-zinc-100 placeholder:text-zinc-500
 			focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-500
-			transition-colors duration-150;
+			transition-all duration-150;
 	}
 	.label {
 		@apply block text-sm font-medium text-zinc-400 mb-1;
@@ -63,9 +66,89 @@
 	.nav-link {
 		@apply flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium
 			text-zinc-400 hover:text-zinc-100 hover:bg-surface-200
-			transition-colors duration-150;
+			transition-all duration-200;
+	}
+	.nav-link:hover {
+		transform: translateX(2px);
 	}
 	.nav-link-active {
 		@apply text-brand-400 bg-brand-500/10 hover:bg-brand-500/15 hover:text-brand-300;
+		box-shadow: inset 3px 0 0 theme('colors.brand.500');
+	}
+
+	/* Rarity card border system */
+	.rarity-common {
+		@apply border-zinc-500/20;
+	}
+	.rarity-uncommon {
+		@apply border-emerald-500/30;
+	}
+	.rarity-uncommon:hover {
+		box-shadow: 0 0 16px rgba(52, 211, 153, 0.15);
+	}
+	.rarity-rare {
+		@apply border-blue-500/30;
+	}
+	.rarity-rare:hover {
+		box-shadow: 0 0 16px rgba(96, 165, 250, 0.15);
+	}
+	.rarity-epic {
+		@apply border-purple-500/40;
+		box-shadow: 0 0 8px rgba(167, 139, 250, 0.1);
+	}
+	.rarity-epic:hover {
+		box-shadow: 0 0 24px rgba(167, 139, 250, 0.25);
+	}
+	.rarity-legendary {
+		@apply border-amber-500/40;
+		box-shadow: 0 0 8px rgba(251, 191, 36, 0.1);
+		animation: glowLegendary 2s ease-in-out infinite alternate;
+	}
+	.rarity-legendary:hover {
+		box-shadow: 0 0 32px rgba(251, 191, 36, 0.35);
+	}
+
+	/* Champion card styling */
+	.champion-card {
+		@apply relative overflow-hidden;
+		background: linear-gradient(135deg, rgba(251, 191, 36, 0.08), rgba(124, 58, 237, 0.08));
+	}
+	.champion-card::before {
+		content: '';
+		@apply absolute inset-0 opacity-30;
+		background: radial-gradient(ellipse at top right, rgba(251, 191, 36, 0.15), transparent 70%);
+	}
+
+	/* Danger zone styling */
+	.danger-zone {
+		@apply border-red-500/30 bg-red-950/20;
+	}
+	.danger-zone:hover {
+		box-shadow: 0 0 16px rgba(239, 68, 68, 0.1);
+	}
+
+	/* Settings group card */
+	.settings-group {
+		@apply bg-surface-100/80 border border-surface-300 rounded-xl overflow-hidden;
+	}
+	.settings-group-header {
+		@apply px-5 py-3 border-b border-surface-300/50 bg-surface-200/30;
+	}
+
+	/* Diff tokens for audit log */
+	.diff-added {
+		@apply bg-green-500/15 text-green-400 px-1 rounded;
+	}
+	.diff-removed {
+		@apply bg-red-500/15 text-red-400 px-1 rounded line-through;
+	}
+}
+
+@layer utilities {
+	.text-glow-brand {
+		text-shadow: 0 0 12px rgba(124, 58, 237, 0.5);
+	}
+	.text-glow-gold {
+		text-shadow: 0 0 12px rgba(251, 191, 36, 0.5);
 	}
 }

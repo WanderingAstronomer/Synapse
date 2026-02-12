@@ -5,6 +5,7 @@
 	import EmptyState from '$lib/components/EmptyState.svelte';
 	import { timeAgo, eventTypeLabel, eventColor, fmt } from '$lib/utils';
 	import { Chart, registerables } from 'chart.js';
+	import SynapseLoader from '$lib/components/SynapseLoader.svelte';
 
 	Chart.register(...registerables);
 
@@ -148,7 +149,7 @@
 
 {#if loading}
 	<div class="flex items-center justify-center h-48">
-		<div class="w-8 h-8 border-2 border-brand-500 border-t-transparent rounded-full animate-spin"></div>
+		<SynapseLoader text="Loading activity..." />
 	</div>
 {:else if !data || data.events.length === 0}
 	<EmptyState icon="⚡" title="No activity yet" description="Events will stream in once the bot processes interactions." />
@@ -166,7 +167,7 @@
 		<h2 class="text-sm font-semibold text-zinc-300 mb-4">Recent Events</h2>
 		<div class="space-y-2 max-h-[500px] overflow-y-auto pr-2">
 			{#each data.events as event}
-				<div class="flex items-center gap-3 p-2.5 rounded-lg hover:bg-surface-200/50 transition-colors">
+				<div class="flex items-center gap-3 p-2.5 rounded-lg hover:bg-surface-200/50 hover:scale-[1.005] active:scale-[0.995] transition-all duration-150">
 					<Avatar src={event.avatar_url} size={32} />
 					<div class="flex-1 min-w-0">
 						<div class="flex items-center gap-2">

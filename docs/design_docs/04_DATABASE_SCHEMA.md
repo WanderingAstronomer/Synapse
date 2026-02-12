@@ -374,7 +374,7 @@ has no enforced schema at the DB level; validation is in application code.
 > **Decision D04-01:** Config in Database, Not YAML
 > - **Status:** Accepted
 > - **Context:** YAML config requires server restarts and SSH access to modify.
->   Club leads are students who need a web UI.
+>   Community operators need a web UI.
 > - **Choice:** Zones, multipliers, and achievement templates are DB rows.
 >   YAML is used only for initial seeding (`seed.py`).
 > - **Consequences:** Requires a web admin panel for CRUD operations.
@@ -404,7 +404,7 @@ has no enforced schema at the DB level; validation is in application code.
 
 > **Decision D04-05:** Zone-Time Composite Index
 > - **Status:** Accepted
-> - **Context:** Club Pulse will frequently query "activity by zone over time".
+> - **Context:** The dashboard will frequently query "activity by zone over time".
 > - **Choice:** Add index `activity_log(zone_id, timestamp)`.
 > - **Consequences:** Prevents degraded chart performance as logs grow.
 

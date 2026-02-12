@@ -25,7 +25,7 @@
 | DB-14 | All performance indexes per §4.4 | §4.4 | `synapse/database/models.py` | — | ✅ |
 | DB-15 | metadata JSONB column on activity_log | §4.6 | `synapse/database/models.py` | — | ✅ |
 
-## Reward Engine (05_REWARD_ENGINE.md)
+## Reward Pipeline (05_RULES_ENGINE.md §5 — current code implements the v3.0 pipeline)
 
 | Req ID | Requirement | Source | Implementation | Tests | Status |
 |--------|-------------|--------|---------------|-------|--------|
@@ -41,7 +41,7 @@
 | RE-10 | LLM quality assessment slot (disabled) | §5.9, D05-02 | `synapse/engine/reward.py` | — | ✅ |
 | RE-11 | PG LISTEN/NOTIFY cache invalidation | §5.12, D05-08 | `synapse/engine/cache.py` | `tests/test_cache.py` | ✅ |
 
-## Dual Economy (03_DUAL_ECONOMY.md)
+## Economy (03_CONFIGURABLE_ECONOMY.md — current code implements v3.0 dual economy)
 
 | Req ID | Requirement | Source | Implementation | Tests | Status |
 |--------|-------------|--------|---------------|-------|--------|
@@ -52,7 +52,7 @@
 | EC-05 | Star anti-gaming (unique-reactor, caps, diminishing) | §3.7, D03-07 | `synapse/engine/reward.py` | `tests/test_anti_gaming.py` | ✅ |
 | EC-06 | Voice earns Stars only | §3.4, D03-04 | `synapse/engine/reward.py` | `tests/test_reward_engine.py` | ✅ |
 
-## Achievements (06_ACHIEVEMENTS.md)
+## Achievements (06_MILESTONES.md — current code uses v3.0 achievement model)
 
 | Req ID | Requirement | Source | Implementation | Tests | Status |
 |--------|-------------|--------|---------------|-------|--------|
@@ -70,7 +70,7 @@
 
 | Req ID | Requirement | Source | Implementation | Tests | Status |
 |--------|-------------|--------|---------------|-------|--------|
-| AP-01 | Public Club Pulse (leaderboard, activity, achievements) | §7.7 | `dashboard/src/routes/` (overview, leaderboard, activity, achievements) | — | ✅ |
+| AP-01 | Public dashboard (leaderboard, activity, achievements) | §7.7 | `dashboard/src/routes/` (overview, leaderboard, activity, achievements) | — | ✅ |
 | AP-02 | Admin zone CRUD | §7.4 | `synapse/api/routes/admin.py`, `dashboard/src/routes/admin/zones/` | — | ✅ |
 | AP-03 | Admin achievement builder | §7.5 | `synapse/api/routes/admin.py`, `dashboard/src/routes/admin/achievements/` | — | ✅ |
 | AP-04 | Admin manual awards | §7.6 | `synapse/api/routes/admin.py`, `dashboard/src/routes/admin/awards/` | — | ✅ |

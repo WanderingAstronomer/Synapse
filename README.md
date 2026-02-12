@@ -1,6 +1,6 @@
 # 🧠 Project Synapse
 
-**A gamified engagement framework for university clubs** — bridges Discord activity to meaningful recognition through XP, Stars, Gold, achievements, and seasonal progression.
+**A modular community operating system for Discord** — captures activity, drives engagement through configurable economies and rules, and surfaces insights through a real-time dashboard. Deploy it for a student club, a nonprofit, a gaming guild, or a study group — then configure it to match your community's culture.
 
 ## Architecture
 
@@ -25,21 +25,34 @@
 - **db** — PostgreSQL 16
 - **bot** — Discord bot (`python -m synapse.bot`)
 - **api** — FastAPI REST layer (`uvicorn synapse.api.main:app`)
-- **dashboard** — SvelteKit frontend (public Club Pulse + admin panel)
+- **dashboard** — SvelteKit frontend (public analytics + admin panel)
 
-## Dual Economy
+### Three Pillars (v4.0)
 
-| Currency | Earning | Purpose |
-|----------|---------|---------|
-| **XP** | Weighted by zone multipliers + quality modifiers | Progression (levels, rank) |
-| **Stars** ⭐ | Flat per event type | Social recognition (achievements, seasonal) |
-| **Gold** 🪙 | Level-up bonus (50/level) | Spendable (minimal sink via `/buy-coffee`) |
+| Pillar | Purpose | Status |
+|--------|---------|--------|
+| **Event Lake** | Captures ephemeral Discord gateway events | 📋 Planned (P4) |
+| **Ledger** | Configurable currencies, wallets, transactions | 📋 Planned (P5) |
+| **Rules Engine** | IFTTT-style trigger/condition/effect rules | 📋 Planned (P6) |
 
-## Zones & Multipliers
+## Configurable Economy
 
-Channels are grouped into **Zones** (e.g., programming, cybersecurity, general, memes). Each zone has per-event-type XP and Star multipliers stored in PostgreSQL, editable in the admin dashboard.
+Admins define their own currencies — or use presets:
 
-## Event Pipeline
+| Default (Classic Gamification) | Function | Configurable? |
+|-------------------------------|----------|---------------|
+| **XP** ✨ | Progression (drives leveling) | Name, symbol, level curve |
+| **Stars** ⭐ | Seasonal recognition | Name, seasonal toggle |
+| **Gold** 🪙 | Spendable currency | Name, spend rules |
+
+Communities can define any number of currencies with any names, or run with
+no economy at all (Analytics Only preset).
+
+## Regions & Multipliers
+
+Channels are grouped into **Regions** (e.g., programming, cybersecurity, general, memes). Each region has per-event-type multipliers stored in PostgreSQL, editable in the admin dashboard. (Regions are the v4.0 internal name for what the admin sees as their configured label — "Zones," "Areas," "Channels," etc.)
+
+## Event Pipeline (Current — v3.0)
 
 ```
 Discord Event → SynapseEvent → Zone Classification → Quality Modifier
@@ -47,17 +60,26 @@ Discord Event → SynapseEvent → Zone Classification → Quality Modifier
 → Stat Update → Achievement Check → Level-Up Check
 ```
 
-**Anti-gaming measures**: self-reaction filter, unique-reactor weighting, per-user per-target caps, diminishing returns, reaction velocity cap.
+**v4.0 Pipeline (Planned):**
+```
+Discord Event → Event Lake → Rules Engine → Ledger Transactions
+→ Milestone Check → Announcements
+```
 
-## Achievements
+**Anti-gaming measures**: self-reaction filter, unique-reactor weighting, per-user per-target caps, diminishing returns, reaction velocity cap. These become configurable rule conditions in v4.0.
 
-Four trigger types:
+## Milestones (Achievements)
+
+Current (v3.0) trigger types:
 - `counter_threshold` — Stat field reaches a value (e.g., 100 messages)
 - `star_threshold` — Season or lifetime stars reach a value
 - `xp_milestone` — XP reaches a value
 - `custom` — Admin-granted only
 
-11 seed achievements included (First Steps, Rising Star, Chatterbox, etc.)
+v4.0 adds compound requirements, streak tracking, and requirement
+expressions against the Ledger and Event Lake.
+
+11 seed milestones included (First Steps, Rising Star, Chatterbox, etc.)
 
 ## Bot Commands
 
@@ -75,7 +97,7 @@ Four trigger types:
 
 ## Dashboard
 
-### Club Pulse (Public)
+### Community Dashboard (Public)
 - **Overview** — Hero banner with live metrics (total members, XP, active users, top level)
 - **Leaderboard** — Paginated XP / Gold / Level tabs with Discord avatars and progress bars
 - **Activity** — Chart.js stacked bar chart (daily event breakdown), filterable event feed
@@ -148,9 +170,25 @@ uv run pytest tests/ -v
 docker compose up --build
 ```
 
+### Docker Compose (Single App Container)
+
+Run bot + API + dashboard in one container (plus PostgreSQL):
+
+```bash
+docker compose -f docker-compose.single.yml up -d --build
+```
+
+Services in this mode:
+- `db` — PostgreSQL
+- `synapse` — all-in-one app container (Discord bot + FastAPI + Svelte dashboard)
+
+Notes:
+- Exposes `3000` (dashboard) and `8000` (API) from the same container.
+- Uses `Dockerfile.single` and startup script `docker/start-all.sh`.
+
 ### Configuration
 
-Edit `config.yaml` for club-specific settings:
+Edit `config.yaml` for community-specific settings:
 
 ```yaml
 club_name: "Your Club"
@@ -220,10 +258,10 @@ dashboard/                   # SvelteKit frontend (separate Node project)
 └── Dockerfile               # Multi-stage Node build for production
 ```
 
-## Implemented vs Deferred
+## Implemented vs Planned
 
-### ✅ Implemented
-- Full dual economy (XP + Stars + Gold)
+### ✅ Implemented (P0–P3.5)
+- Full economy (XP + Stars + Gold) — hardcoded, to be replaced by Ledger in P5
 - Zone-based multipliers with per-event-type granularity
 - Quality-weighted message XP (length, code, links, attachments)
 - Anti-gaming suite (self-reaction filter, unique-reactor weighting, diminishing returns)
@@ -232,21 +270,29 @@ dashboard/                   # SvelteKit frontend (separate Node project)
 - Achievement system (4 trigger types, 11 seed achievements)
 - Seasonal stats with season rollover
 - FastAPI REST API with typed endpoints
-- SvelteKit dashboard with Tailwind CSS + Chart.js
+- SvelteKit dashboard with cyber-industrial aesthetic + Chart.js
 - Discord OAuth → JWT admin authentication with role check
-- Audit-logged admin mutations with before/after snapshots
+- Audit-logged admin mutations with before/after visual diffs
 - Rate-limited admin panel (30 mutations/min)
 - Voice channel XP with anti-idle
 - Thread creation tracking
 - Discord avatar integration (CDN URL construction)
 
-### 🔮 Deferred
-- **GitHub Neural Bridge** — GitHub webhook → XP attribution (requires webhook infra)
-- **LLM Quality Modifier** — AI-based content quality scoring (stub present)
-- **Quests** — Table exists, UI deferred to P2
-- **Alembic Migrations** — Using `create_all` for dev; add before production
-- **Custom Badge Images** — `badge_image_url` column exists, rendering deferred
-- **DM Notifications** — Preference column exists, delivery deferred
+### 📋 Planned (v4.0 — P4–P8)
+- **Event Lake** — Gateway event capture + retention policies
+- **Configurable Currencies** — Admin-defined currencies, wallets, transaction ledger
+- **Rules Engine** — IFTTT-style configurable rules replacing hardcoded pipeline
+- **Milestones v2** — Compound requirements against Ledger + Event Lake
+- **Module System** — Toggle Economy, Milestones, Analytics, Announcements, Seasons
+- **Taxonomy System** — Admin-configurable labels for all internal terms
+- **Preset System** — Classic Gamification, Analytics Only, Minimal Engagement
+- **Rule Builder UI** — Visual trigger/condition/effect editor in dashboard
+
+### 💭 Backlog
+- **GitHub Neural Bridge** — GitHub webhook → event source
+- **LLM Quality Modifier** — AI-based content quality scoring
+- **Recipe Marketplace** — Community-contributed configuration presets
+- **Intelligence** — AI quest generation, smart suggestions
 
 ## Tech Stack
 

@@ -1,7 +1,7 @@
 [project]
 name = "synapse"
 version = "0.1.0"
-description = "A gamified Neural Bridge for university clubs — connects Discord engagement to GitHub contributions."
+description = "A modular community operating system for Discord — captures activity, drives engagement through configurable economies and rules, and surfaces insights through a real-time dashboard."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -15,6 +15,7 @@ dependencies = [
     "uvicorn[standard]>=0.34.0",
     "python-jose[cryptography]>=3.3.0",
     "httpx>=0.28.0",
+    "alembic>=1.18.4",
 ]
 
 [dependency-groups]

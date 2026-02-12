@@ -2,7 +2,8 @@
 synapse.engine.cache — In-Memory Config Cache with PG LISTEN/NOTIFY
 =====================================================================
 
-Implements the caching strategy per 05_REWARD_ENGINE.md §5.12 and D05-08.
+Implements the caching strategy per the original Reward Engine design (§5.12, D05-08).
+Note: 05_REWARD_ENGINE.md has been superseded by 05_RULES_ENGINE.md in v4.0 docs.
 Config data (zones, multipliers, achievement templates, settings) is cached
 in memory.  Cache invalidation uses PostgreSQL LISTEN/NOTIFY so admin
 changes propagate near-instantly.

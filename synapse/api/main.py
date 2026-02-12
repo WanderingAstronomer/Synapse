@@ -19,6 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from synapse.api.auth import router as auth_router
 from synapse.api.deps import get_engine
 from synapse.api.routes.admin import router as admin_router
+from synapse.api.routes.event_lake import router as event_lake_router
 from synapse.api.routes.public import router as public_router
 
 load_dotenv()
@@ -58,6 +59,7 @@ app.add_middleware(
 app.include_router(auth_router, prefix="/api")
 app.include_router(public_router, prefix="/api")
 app.include_router(admin_router, prefix="/api")
+app.include_router(event_lake_router, prefix="/api")
 
 
 @app.get("/api/health")

@@ -1,6 +1,6 @@
 # 02 — System Architecture
 
-> *Four services, one database, minimal ops burden.*
+> *Four services, one database, three pillars, minimal ops burden.*
 
 ---
 
@@ -15,42 +15,44 @@ for a solo maintainer.
 │                        Discord Server                                │
 │   Members chat, react, join voice, use slash commands                │
 └──────────┬───────────────────────────────────────────────────────────┘
-           │ Events (on_message, on_reaction_add, etc.)           
-           ▼                                                      
-┌──────────────────────┐                                          
-│  Service 1: BOT      │                                          
-│  (discord.py)        │                                          
-│                      │                                          
-│  - Listens to events │                                          
-│  - Normalizes to     │                                          
-│    SynapseEvent      │                                          
-│  - Runs Reward       │                                         
-│    Engine module     │                                          
-│  - Posts embeds      │                                          
-└────────┬─────────────┘                                          
-         │                                                        
-         ▼                                                        
-┌────────────────────────────────────┐                                          
-│  Service 2: API                    │                                                 
-│  (FastAPI + uvicorn on :8000)      │                            
-│                                    │                             
-│  - REST endpoints (/api/*)         │                             
-│  - Discord OAuth → JWT auth        │                            
-│  - Admin CRUD (audit-logged)       │                             
-│  - Public analytics queries        │                             
-└────────┬───────────────────────────┘                                          
-         │                                                         
-         ▼                                                         
+           │ Gateway Events (ephemeral — disappear if not captured)
+           ▼
+┌───────────────────────────┐
+│  Service 1: BOT           │
+│  (discord.py)             │
+│                           │
+│  - Captures gateway events│
+│  - Writes to Event Lake   │  ← NEW in v4.0
+│  - Runs Rules Engine      │  ← NEW in v4.0 (replaces Reward Engine)
+│  - Posts embeds           │
+└────────┬──────────────────┘
+         │
+         ▼
+┌────────────────────────────────────┐
+│  Service 2: API                    │
+│  (FastAPI + uvicorn on :8000)      │
+│                                    │
+│  - REST endpoints (/api/*)         │
+│  - Discord OAuth → JWT auth        │
+│  - Admin CRUD (audit-logged)       │
+│  - Rule + Currency + Module mgmt   │  ← NEW in v4.0
+│  - Public analytics queries        │
+└────────┬───────────────────────────┘
+         │
+         ▼
 ┌──────────────────────────────────────────────────────────────────┐
 │  Service 3: DASHBOARD  (SvelteKit on :3000)                      │
-│  - Public pages (overview, leaderboard, activity, achievements)  │
-│  - Admin pages (zones, achievements, awards, settings, audit)    │
+│  - Public pages (overview, leaderboard, activity, milestones)    │
+│  - Admin pages (rules, currencies, modules, regions, audit)      │  ← expanded in v4.0
 │  - Talks to API only (never touches DB directly)                 │
 └──────────────────────────────────────────────────────────────────┘
-                                                                    
+
 ┌──────────────────────────────────────────────────────────────────┐
 │  Service 4: DATABASE  (PostgreSQL 16)                            │
-│  - Users, Zones, Achievements, ActivityLog, Settings, Quests     │
+│  - Event Lake (raw captured events)                              │  ← NEW in v4.0
+│  - Ledger (currencies, wallets, transactions)                    │  ← NEW in v4.0
+│  - Rules (configurable trigger/condition/effect)                 │  ← NEW in v4.0
+│  - Milestones, Regions, Settings, Modules, Taxonomy              │
 │  - All configuration lives here (not in YAML at production)      │
 └──────────────────────────────────────────────────────────────────┘
 ```
@@ -66,62 +68,116 @@ for a solo maintainer.
 
 ---
 
-## 2.2 Data Flow: The Event Pipeline
+## 2.2 The Three Pillars (v4.0)
+
+The v4.0 architecture adds three foundational subsystems that sit between
+the raw Discord events and the user-facing features:
+
+```
+Discord Gateway ──→ Event Lake ──→ Rules Engine ──→ Ledger ──→ Dashboard
+   (ephemeral)      (captured)     (configurable)   (audited)   (visible)
+```
+
+### Pillar 1: Event Lake (Data In)
+
+The Event Lake captures ephemeral Discord gateway events that would
+otherwise be lost.  It is an append-only table storing normalized event
+payloads.  The bot is the sole writer; the API and Rules Engine are readers.
+
+See [03B_DATA_LAKE.md](03B_DATA_LAKE.md) for the full design.
+
+**Key design principle:** Only store data that disappears.  Discord's REST
+API can fetch static/historical data (member lists, channel info, roles)
+on demand — there's no need to duplicate it.  The Event Lake focuses on
+the stream: messages sent, reactions added, voice sessions started, etc.
+
+### Pillar 2: Ledger (Currency)
+
+The Ledger replaces hardcoded `users.xp` and `users.gold` columns with
+a configurable currency system: admin-defined **Currencies**, per-user
+**Wallets**, and append-only **Transactions**.
+
+See [03_CONFIGURABLE_ECONOMY.md](03_CONFIGURABLE_ECONOMY.md).
+
+### Pillar 3: Rules Engine (Decisions)
+
+The Rules Engine replaces the hardcoded Reward Engine pipeline with
+configurable trigger/condition/effect rules stored as JSON in the database.
+
+See [05_RULES_ENGINE.md](05_RULES_ENGINE.md).
+
+---
+
+## 2.3 Data Flow: The Event Pipeline
 
 Every interaction in Discord follows this path:
 
 ```
-1. Discord Event
+1. Discord Gateway Event
        │
        ▼
-2. [Bot: Event Listener]
+2. [Bot: Event Capture]
    Cog receives on_message / on_reaction_add / on_voice_state_update
        │
        ▼
-3. [Bot: Event Normalizer]
-   Converts raw discord.py objects into a SynapseEvent dataclass:
-     SynapseEvent(
-       user_id=123,
-       event_type=InteractionType.MESSAGE,
-       channel_id=456,
-       zone_id=None,       # resolved by Reward Engine
-       metadata={"length": 312, "has_code_block": True},
-       timestamp=datetime.now(UTC)
-     )
+3. [Bot: Event Lake Writer]
+   Normalizes raw discord.py objects into an Event Lake entry:
+     {
+       user_id: 123,
+       event_type: "message_create",
+       channel_id: 456,
+       guild_id: 789,
+       payload: { length: 312, has_code_block: true, ... },
+       source_id: "discord_snowflake_abc",
+       timestamp: "2025-01-15T14:30:00Z"
+     }
+   INSERT into event_lake (idempotent via source_id)
        │
        ▼
-4. [Bot: Reward Engine Module]
-   a. Zone Classification  — Which zone does this channel belong to?
-   b. Multiplier Lookup    — What are the XP/Star multipliers for this zone+event type?
-   c. Quality Analysis     — Message length, code blocks, link enrichment, LLM score?
-   d. XP Calculation       — base_xp × zone_multiplier × quality_modifier
-   e. Star Calculation     — base_stars × zone_star_multiplier
-   f. Achievement Check    — Does this push any counter past a threshold?
+4. [Bot: Rules Engine]
+   a. Load enabled rules (cached, PG NOTIFY refresh)
+   b. For each rule where trigger matches this event:
+      - Evaluate all conditions (zone filter, caps, anti-gaming)
+      - If conditions pass: execute effects
+   c. Effects may include:
+      - Ledger transactions (credit XP, Stars, Gold, etc.)
+      - Milestone checks (query wallets + event counts)
+      - Announcements (level-up, milestone earned)
+      - Role assignments
+   d. All ledger writes batched in one DB transaction
        │
        ▼
 5. [Database: State Update]
-   a. UPDATE users SET xp = xp + ?, stars = stars + ?
-   b. INSERT INTO activity_log (...) ON CONFLICT (source_system, source_event_id)
-      DO NOTHING — idempotent insert prevents double-credit (D04-07)
-   c. UPDATE user_stats SET messages_sent = messages_sent + 1
-   d. If achievement triggered → INSERT INTO user_achievements
+   a. Event Lake entry persisted (step 3)
+   b. Wallet balances updated via transactions
+   c. If milestone triggered → INSERT into user_milestones
+   d. If rule logs → INSERT into admin_log
        │
        ▼
 6. [Bot: Response]
-   a. If level-up    → Post celebratory embed in channel
-   b. If achievement → Post achievement embed in announcement channel
-   c. Otherwise      → Silent (no spam)
+   a. If level-up     → Post celebratory embed in channel
+   b. If milestone    → Post milestone embed in announcement channel
+   c. Otherwise       → Silent (no spam)
 ```
 
 ---
 
-## 2.3 Service Boundaries
+## 2.4 Service Boundaries
 
 ### Bot Runtime Boundary
 
-The bot owns event ingestion and reward calculation.  All Discord events are
-normalized into `SynapseEvent`, passed through the reward module, and then
-persisted to PostgreSQL.
+The bot owns **event capture** and **rule evaluation**.  All Discord
+gateway events are normalized into Event Lake entries, then processed
+by the Rules Engine.  The bot writes to the Event Lake, Ledger (wallets/
+transactions), and milestones tables.
+
+The bot is also the sole consumer of the Discord gateway connection.
+It holds two privileged intents: **MESSAGE_CONTENT** (quality analysis
+of message text without storing it) and **GUILD_MEMBERS** (join/leave
+tracking, member cache population).  **GUILD_PRESENCES** is explicitly
+disabled — it is the highest-bandwidth intent and provides no engagement
+signal.  See [03B_DATA_LAKE.md §3B.2](03B_DATA_LAKE.md) for the full
+intent matrix and verification requirements.
 
 ### API → Database Communication
 
@@ -129,10 +185,9 @@ The FastAPI service is the **sole gateway** between the web frontend and the
 database.  It exposes typed REST endpoints under `/api/*` for both public
 analytics and authenticated admin operations.
 
-All admin config mutations (zone CRUD, multiplier changes, manual awards,
-season rolls) are **audit-logged** via the shared service layer.  Every write
-inserts a row into `admin_log` with before/after snapshots before committing
-the config change.  See D02-05 and D04-06.
+All admin config mutations (rule CRUD, currency definitions, region changes,
+manual awards, module toggles, taxonomy edits, season rolls) are
+**audit-logged** via the shared service layer.
 
 ### Dashboard → API Communication
 
@@ -140,30 +195,48 @@ The SvelteKit dashboard **never accesses PostgreSQL directly**.  All data
 flows through the FastAPI REST endpoints.  Authentication is handled via
 Discord OAuth2 → JWT tokens issued by the API.
 
+### Module System
+
+v4.0 introduces **Modules** — toggleable feature groups that control which
+subsystems are active for a given deployment:
+
+| Module | Controls | Default |
+|--------|----------|---------|
+| Economy | Currencies, wallets, transactions, leaderboard | ON |
+| Milestones | Milestone templates, earn tracking, gallery | ON |
+| Analytics | Event Lake capture, activity charts, heatmaps | ON |
+| Announcements | Level-up/milestone embeds, activity ticker | ON |
+| Seasons | Seasonal currency resets, season snapshots | OFF |
+
+Modules are not code-level plugins — they are **feature flags** stored in
+the `modules` table.  When a module is OFF, its related rules are skipped,
+its API endpoints return 404, and its dashboard pages are hidden.
+
 ---
 
-## 2.4 The Cog System (Bot Modularity)
+## 2.5 The Cog System (Bot Modularity)
 
 The bot uses discord.py's **Cog** (extension) pattern.  Each Cog is a
 self-contained module that can be loaded, unloaded, or hot-reloaded.
 
 ```
 synapse/bot/cogs/
-├── social.py        # on_message → XP engine (core, always loaded)
-├── reactions.py     # on_reaction_add/remove → star engine
-├── voice.py         # on_voice_state_update → presence tracking
-├── threads.py       # on_thread_create → thread tracking
-├── meta.py          # /profile, /link-github, /leaderboard
-└── admin.py         # /award, /create-achievement, /grant-achievement
+├── social.py        # on_message → Event Lake + Rules Engine
+├── reactions.py     # on_reaction_add/remove → Event Lake + Rules Engine
+├── voice.py         # on_voice_state_update → Event Lake + derived events
+├── threads.py       # on_thread_create → Event Lake + Rules Engine
+├── meta.py          # /profile, /leaderboard (reads from wallets)
+└── admin.py         # /award, /create-milestone, /grant-milestone
 ```
 
-**Plugin Convention:** The Reward Engine doesn't care where events come from —
-it only sees `SynapseEvent` objects.  Future integrations (GitHub webhooks,
-TryHackMe) add new cogs that emit `SynapseEvent` without changing the core.
+**Plugin Convention:** The Rules Engine doesn't care where events come from —
+it processes Event Lake entries.  Future integrations (GitHub webhooks,
+external APIs) add new event sources that write to the Event Lake without
+changing the Rules Engine or core cogs.
 
 ---
 
-## 2.5 Technology Stack Summary
+## 2.6 Technology Stack Summary
 
 | Layer | Technology | Justification |
 |-------|-----------|---------------|
@@ -247,3 +320,39 @@ TryHackMe) add new cogs that emit `SynapseEvent` without changing the core.
 > - **Consequences:** Clean frontend/backend separation.  API handles auth,
 >   validation, and audit logging.  Dashboard is a pure static/SSR client.
 >   Slightly more services to manage, but each is independently deployable.
+
+> **Decision D02-08:** Three-Pillar Data Architecture (v4.0)
+> - **Status:** Accepted (New in v4.0)
+> - **Context:** The v3.0 bot ran a hardcoded Reward Engine pipeline.
+>   All currency names, anti-gaming logic, and quality modifiers were
+>   Python code.  This prevented non-developers from configuring behavior.
+> - **Choice:** Introduce three foundational subsystems — Event Lake
+>   (data capture), Ledger (configurable currencies), and Rules Engine
+>   (configurable logic) — that decouple "what happened" from "what to
+>   do about it."
+> - **Consequences:** Community operators can configure all behavior through
+>   the dashboard.  The bot becomes a data vacuum + rule evaluator rather
+>   than a reward calculator.
+
+> **Decision D02-09:** Module System as Feature Flags (v4.0)
+> - **Status:** Accepted (New in v4.0)
+> - **Context:** Not every community wants every feature.  A study group
+>   may want analytics but no economy.
+> - **Choice:** Introduce a `modules` table with boolean toggles.  Disabled
+>   modules skip their rules, hide their API endpoints, and hide their
+>   dashboard pages.
+> - **Consequences:** Lightweight feature toggling without code-level plugin
+>   architecture.  Simple enough for a single-maintainer project.
+
+> **Decision D02-10:** Gateway Intent Configuration (v4.0)
+> - **Status:** Accepted (New in v4.0)
+> - **Context:** Discord v10 requires explicit opt-in to event categories
+>   via Gateway Intents.  Privileged intents (MESSAGE_CONTENT, GUILD_MEMBERS,
+>   GUILD_PRESENCES) require justification and approval at 75+ servers.
+> - **Choice:** Enable 4 standard intents (GUILDS, GUILD_MESSAGES,
+>   GUILD_MESSAGE_REACTIONS, GUILD_VOICE_STATES) and 2 privileged intents
+>   (MESSAGE_CONTENT, GUILD_MEMBERS).  Skip GUILD_PRESENCES entirely.
+> - **Consequences:** Full coverage of engagement events (messages, reactions,
+>   voice, threads, membership).  No online/offline tracking.  Two intents
+>   to justify at verification instead of three.
+>   See [03B_DATA_LAKE.md](03B_DATA_LAKE.md) for details.

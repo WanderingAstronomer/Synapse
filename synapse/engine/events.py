@@ -2,9 +2,10 @@
 synapse.engine.events — SynapseEvent and InteractionType
 =========================================================
 
-The universal event envelope per 05_REWARD_ENGINE.md §5.2.
+The universal event envelope (originally per 05_REWARD_ENGINE.md §5.2,
+now documented in 05_RULES_ENGINE.md §5.2).
 Every Discord interaction is normalized into a SynapseEvent before
-the reward engine processes it.
+the reward pipeline processes it.
 """
 
 from __future__ import annotations
@@ -56,7 +57,7 @@ BASE_STARS: dict[InteractionType, int] = {
 class SynapseEvent:
     """Normalized event from any source (Discord, GitHub, admin, etc.).
 
-    This is the sole input to the reward engine. All source-specific
+    This is the sole input to the reward pipeline. All source-specific
     details are captured in ``metadata``.
     """
 

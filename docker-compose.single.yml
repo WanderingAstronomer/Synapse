@@ -1,0 +1,48 @@
+# Optional single-container app mode (bot + api + dashboard in one container)
+# Usage:
+#   docker compose -f docker-compose.single.yml up -d --build
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: synapse-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: synapse
+      POSTGRES_PASSWORD: synapse
+      POSTGRES_DB: synapse
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U synapse"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  synapse:
+    build:
+      context: .
+      dockerfile: Dockerfile.single
+    container_name: synapse-all-in-one
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg2://synapse:synapse@db:5432/synapse
+      JWT_SECRET: ${JWT_SECRET:-synapse-dev-secret-change-me}
+      DISCORD_REDIRECT_URI: http://localhost:3000/auth/callback
+      FRONTEND_URL: http://localhost:3000
+      ORIGIN: http://localhost:3000
+      BODY_SIZE_LIMIT: Infinity
+      API_BASE_URL: http://localhost:8000/api
+    ports:
+      - "3000:3000"
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+    driver: local

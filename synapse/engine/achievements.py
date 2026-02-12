@@ -2,9 +2,13 @@
 synapse.engine.achievements — Achievement Check Pipeline
 ==========================================================
 
-Implements the achievement check pipeline per 06_ACHIEVEMENTS.md §6.5.
-After the reward engine calculates XP and Stars, this module checks
+Implements the achievement check pipeline (originally per
+06_ACHIEVEMENTS.md §6.5, now documented in 06_MILESTONES.md §6.5).
+After the reward pipeline calculates XP and Stars, this module checks
 whether any achievement templates have been triggered.
+
+Note: In v4.0 (P7), achievements will be renamed to "milestones" and
+the check logic will query wallets + Event Lake instead of user_stats.
 """
 
 from __future__ import annotations

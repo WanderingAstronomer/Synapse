@@ -1,6 +1,6 @@
 # 07 — Admin Panel & Web UI
 
-> *Club leads are students.  If it isn't point-and-click, it won't get used.*
+> *Community operators range from students to professionals.  If it isn't point-and-click, it won't get used.*
 
 ---
 
@@ -10,10 +10,10 @@ The Admin Panel serves two audiences with two access levels:
 
 | Audience | Access | What They See |
 |----------|--------|---------------|
-| **Any member** | Public (no login) | Club Pulse: leaderboard, activity charts, quest board, achievement gallery |
-| **Club leads** | Authenticated (Discord OAuth or role-based) | Everything above PLUS zone management, achievement builder, manual awards, settings |
+| **Any member** | Public (no login) | Community Dashboard: leaderboard, activity charts, quest board, achievement gallery |
+| **Server administrators** | Authenticated (Discord OAuth or role-based) | Everything above PLUS zone management, achievement builder, manual awards, settings |
 
-**Key constraint:** Club leads are students with varying technical skill.
+**Key constraint:** Community operators have varying technical skill.
 The UI must be **no harder than using a Google Form**.  No terminal, no YAML,
 no SQL.
 
@@ -192,7 +192,7 @@ Achievement templates displayed as cards, filterable by category and rarity:
 
 ---
 
-## 7.7 Public: Club Pulse
+## 7.7 Public: Community Dashboard
 
 The public-facing pages form the "health monitor" for the club.  Any member
 can visit the URL (no login required).

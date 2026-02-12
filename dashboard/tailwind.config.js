@@ -24,14 +24,21 @@ export default {
 					600: '#d97706',
 				},
 				surface: {
-					0: '#09090b',
-					50: '#0c0c0f',
-					100: '#111116',
-					200: '#18181b',
-					300: '#27272a',
-					400: '#3f3f46',
-					500: '#52525b',
-					600: '#71717a',
+					0: '#0a0a0f',
+					50: '#0e0e14',
+					100: '#13131a',
+					200: '#1a1a24',
+					300: '#26263a',
+					400: '#3a3a52',
+					500: '#52526b',
+					600: '#71718a',
+				},
+				rarity: {
+					common: '#9ca3af',
+					uncommon: '#34d399',
+					rare: '#60a5fa',
+					epic: '#a78bfa',
+					legendary: '#fbbf24',
 				},
 			},
 			fontFamily: {
@@ -42,6 +49,12 @@ export default {
 				'fade-in': 'fadeIn 0.3s ease-out',
 				'slide-up': 'slideUp 0.4s ease-out',
 				'glow': 'glow 2s ease-in-out infinite alternate',
+				'glow-legendary': 'glowLegendary 2s ease-in-out infinite alternate',
+				'glow-epic': 'glowEpic 2s ease-in-out infinite alternate',
+				'pulse-slow': 'pulse 4s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+				'gradient-shift': 'gradientShift 8s ease infinite',
+				'float': 'float 6s ease-in-out infinite',
+				'ticker': 'ticker 30s linear infinite',
 			},
 			keyframes: {
 				fadeIn: {
@@ -55,6 +68,26 @@ export default {
 				glow: {
 					'0%': { boxShadow: '0 0 5px rgba(124, 58, 237, 0.2)' },
 					'100%': { boxShadow: '0 0 20px rgba(124, 58, 237, 0.4)' },
+				},
+				glowLegendary: {
+					'0%': { boxShadow: '0 0 8px rgba(251, 191, 36, 0.15), inset 0 0 8px rgba(251, 191, 36, 0.05)' },
+					'100%': { boxShadow: '0 0 24px rgba(251, 191, 36, 0.35), inset 0 0 16px rgba(251, 191, 36, 0.08)' },
+				},
+				glowEpic: {
+					'0%': { boxShadow: '0 0 8px rgba(167, 139, 250, 0.15), inset 0 0 8px rgba(167, 139, 250, 0.05)' },
+					'100%': { boxShadow: '0 0 24px rgba(167, 139, 250, 0.35), inset 0 0 16px rgba(167, 139, 250, 0.08)' },
+				},
+				gradientShift: {
+					'0%, 100%': { backgroundPosition: '0% 50%' },
+					'50%': { backgroundPosition: '100% 50%' },
+				},
+				float: {
+					'0%, 100%': { transform: 'translateY(0)' },
+					'50%': { transform: 'translateY(-6px)' },
+				},
+				ticker: {
+					'0%': { transform: 'translateX(100%)' },
+					'100%': { transform: 'translateX(-100%)' },
 				},
 			},
 		},

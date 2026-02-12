@@ -92,6 +92,16 @@ export const EVENT_COLORS: Record<string, string> = {
 	MANUAL_AWARD: '#fbbf24',
 	ACHIEVEMENT_EARNED: '#9c27b0',
 	LEVEL_UP: '#00bcd4',
+	// Event Lake types (P4)
+	message_create: '#7c3aed',
+	reaction_add: '#2196f3',
+	reaction_remove: '#ef4444',
+	thread_create: '#ff9800',
+	voice_join: '#10b981',
+	voice_leave: '#f59e0b',
+	voice_move: '#06b6d4',
+	member_join: '#8b5cf6',
+	member_leave: '#ec4899',
 };
 
 export function eventColor(type: string): string {

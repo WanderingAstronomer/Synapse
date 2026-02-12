@@ -167,6 +167,44 @@ export const api = {
 
 		getAuditLog: (page = 1, pageSize = 25) =>
 			request<AuditLogResponse>(`/admin/audit?page=${page}&page_size=${pageSize}`),
+
+		// Event Lake (P4)
+		getEventLakeEvents: (params: EventLakeQuery = {}) => {
+			const p = new URLSearchParams();
+			if (params.page) p.set('page', String(params.page));
+			if (params.page_size) p.set('page_size', String(params.page_size));
+			if (params.event_type) p.set('event_type', params.event_type);
+			if (params.user_id) p.set('user_id', String(params.user_id));
+			if (params.channel_id) p.set('channel_id', String(params.channel_id));
+			if (params.since) p.set('since', params.since);
+			if (params.until) p.set('until', params.until);
+			return request<EventLakeListResponse>(`/admin/event-lake/events?${p.toString()}`);
+		},
+		getDataSources: () =>
+			request<DataSourceConfig[]>('/admin/event-lake/data-sources'),
+		toggleDataSources: (toggles: DataSourceToggle[]) =>
+			request<{ updated: number }>('/admin/event-lake/data-sources', {
+				method: 'PUT', body: JSON.stringify(toggles),
+			}),
+		getEventLakeHealth: (days = 30) =>
+			request<EventLakeHealth>(`/admin/event-lake/health?days=${days}`),
+		getStorageEstimate: () =>
+			request<StorageEstimate>('/admin/event-lake/storage-estimate'),
+		triggerRetention: (days = 90) =>
+			request<RetentionResult>(`/admin/event-lake/retention/run?retention_days=${days}`, { method: 'POST' }),
+		triggerReconciliation: () =>
+			request<ReconciliationResult>('/admin/event-lake/reconciliation/run', { method: 'POST' }),
+		triggerBackfill: (dryRun = false) =>
+			request<BackfillResult>(`/admin/event-lake/backfill/run?dry_run=${dryRun}`, { method: 'POST' }),
+		getCounters: (params: CounterQuery = {}) => {
+			const p = new URLSearchParams();
+			if (params.user_id) p.set('user_id', String(params.user_id));
+			if (params.event_type) p.set('event_type', params.event_type);
+			if (params.period) p.set('period', params.period);
+			if (params.page) p.set('page', String(params.page));
+			if (params.page_size) p.set('page_size', String(params.page_size));
+			return request<CounterListResponse>(`/admin/event-lake/counters?${p.toString()}`);
+		},
 	},
 };
 
@@ -290,4 +328,120 @@ export interface AuditLogResponse {
 	page: number;
 	page_size: number;
 	entries: AuditLogEntry[];
+}
+
+// ---------------------------------------------------------------------------
+// Event Lake types (P4)
+// ---------------------------------------------------------------------------
+export interface EventLakeRow {
+	id: number;
+	guild_id: string;
+	user_id: string;
+	event_type: string;
+	channel_id: string | null;
+	target_id: string | null;
+	payload: Record<string, unknown>;
+	source_id: string | null;
+	timestamp: string;
+}
+
+export interface EventLakeListResponse {
+	total: number;
+	page: number;
+	page_size: number;
+	events: EventLakeRow[];
+}
+
+export interface EventLakeQuery {
+	page?: number;
+	page_size?: number;
+	event_type?: string;
+	user_id?: number;
+	channel_id?: number;
+	since?: string;
+	until?: string;
+}
+
+export interface DataSourceConfig {
+	event_type: string;
+	enabled: boolean;
+	label: string;
+	description: string;
+}
+
+export interface DataSourceToggle {
+	event_type: string;
+	enabled: boolean;
+}
+
+export interface VolumePoint {
+	date: string;
+	event_type: string;
+	count: number;
+}
+
+export interface EventLakeHealth {
+	total_events: number;
+	total_counters: number;
+	oldest_event: string | null;
+	newest_event: string | null;
+	table_size_bytes: number;
+	events_today: number;
+	events_7d: number;
+	volume_by_type: Record<string, number>;
+	daily_volume: VolumePoint[];
+}
+
+export interface StorageEstimate {
+	avg_row_bytes: number;
+	total_rows: number;
+	estimated_bytes: number;
+	estimated_mb: number;
+	estimated_gb: number;
+	daily_rate: number;
+	days_of_data: number;
+	projected_90d_mb: number;
+}
+
+export interface RetentionResult {
+	events_deleted: number;
+	counters_deleted: number;
+}
+
+export interface ReconciliationResult {
+	checked: number;
+	corrected: number;
+	corrections: Array<Record<string, unknown>>;
+	timestamp: string;
+}
+
+export interface BackfillResult {
+	rows_read: number;
+	counters_upserted: number;
+	skipped_types: string[];
+	dry_run: boolean;
+	timestamp: string;
+}
+
+export interface CounterQuery {
+	user_id?: number;
+	event_type?: string;
+	period?: string;
+	page?: number;
+	page_size?: number;
+}
+
+export interface CounterRow {
+	user_id: string;
+	event_type: string;
+	zone_id: number;
+	period: string;
+	count: number;
+}
+
+export interface CounterListResponse {
+	total: number;
+	page: number;
+	page_size: number;
+	counters: CounterRow[];
 }

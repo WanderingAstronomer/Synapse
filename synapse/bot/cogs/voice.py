@@ -99,24 +99,70 @@ class Voice(commands.Cog, name="Voice"):
         before: discord.VoiceState,
         after: discord.VoiceState,
     ) -> None:
-        """Inner voice state handler (separated for error isolation)."""
+        """Inner voice state handler — decomposes into join/leave/move (P4).
+
+        Writes Event Lake events AND maintains the legacy tick reward system.
+        """
         if member.bot:
             return
 
-        # Joined a voice channel
+        guild_id = member.guild.id
+        session_id = after.session_id or before.session_id or str(member.id)
+
+        # --- Voice JOIN (was not in channel, now is) ---
         if before.channel is None and after.channel is not None:
             self._voice_sessions[member.id] = time.time()
+
+            await run_db(
+                self.bot.lake_writer.write_voice_join,
+                guild_id=guild_id,
+                user_id=member.id,
+                channel_id=after.channel.id,
+                session_id=session_id,
+                self_mute=after.self_mute or False,
+                self_deaf=after.self_deaf or False,
+            )
             logger.debug("%s joined voice channel %s", member, after.channel)
 
-        # Left a voice channel
+        # --- Voice LEAVE (was in channel, now is not) ---
         elif before.channel is not None and after.channel is None:
             self._voice_sessions.pop(member.id, None)
+
+            await run_db(
+                self.bot.lake_writer.write_voice_leave,
+                guild_id=guild_id,
+                user_id=member.id,
+                channel_id=before.channel.id,
+                session_id=session_id,
+                self_mute=before.self_mute or False,
+                self_deaf=before.self_deaf or False,
+            )
             logger.debug("%s left voice channel %s", member, before.channel)
 
-        # Moved channels — keep tracking
-        elif before.channel != after.channel:
+        # --- Voice MOVE (changed channels) ---
+        elif before.channel is not None and after.channel is not None and before.channel != after.channel:
             self._voice_sessions[member.id] = self._voice_sessions.get(
                 member.id, time.time()
+            )
+
+            await run_db(
+                self.bot.lake_writer.write_voice_move,
+                guild_id=guild_id,
+                user_id=member.id,
+                from_channel_id=before.channel.id,
+                to_channel_id=after.channel.id,
+                session_id=session_id,
+                self_mute=after.self_mute or False,
+                self_deaf=after.self_deaf or False,
+            )
+            logger.debug("%s moved voice %s → %s", member, before.channel, after.channel)
+
+        # --- Mute/deaf state change (same channel) — update tracker ---
+        elif before.channel is not None and after.channel is not None:
+            self.bot.lake_writer.voice_tracker.update_state(
+                member.id, guild_id,
+                after.self_mute or False,
+                after.self_deaf or False,
             )
 
     @tasks.loop(minutes=10)

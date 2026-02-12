@@ -56,6 +56,17 @@ class Threads(commands.Cog, name="Threads"):
         if thread.guild is None:
             return
 
+        # --- Event Lake capture (P4) ----------------------------------------
+        await run_db(
+            self.bot.lake_writer.write_thread_create,
+            guild_id=thread.guild.id,
+            user_id=thread.owner.id,
+            thread_id=thread.id,
+            parent_channel_id=thread.parent_id,
+            thread_name=thread.name,
+        )
+
+        # --- Reward pipeline (will be replaced by Rules Engine in P6) ------
         event = SynapseEvent(
             user_id=thread.owner.id,
             event_type=InteractionType.THREAD_CREATE,

@@ -1,7 +1,7 @@
 # Synapse Design Documents — Index
 
 > **Last Updated:** 2026-02-12
-> **Version:** 3.0 (SvelteKit + FastAPI)
+> **Version:** 4.0 (Modular Community Platform)
 
 This directory contains all architectural decisions, design specifications,
 and strategic direction for Project Synapse.  Each document covers a single
@@ -13,30 +13,23 @@ domain.  Read them in order for the full picture, or jump to the one you need.
 
 | #  | Document | Domain | Summary |
 |----|----------|--------|---------|
-| 01 | [Vision & Philosophy](01_VISION.md) | Strategy | What Synapse is, who it serves, and the core principles that guide every decision. |
-| 02 | [System Architecture](02_ARCHITECTURE.md) | Engineering | Four-service runtime (db, bot, api, dashboard), data flow, and service boundaries. |
-| 03 | [Dual Economy Model](03_DUAL_ECONOMY.md) | Game Design | XP vs. Stars, progression vs. collection, and why we separate them. |
-| 04 | [Database Schema](04_DATABASE_SCHEMA.md) | Data | Every table, column, relationship, and the reasoning behind the design. |
-| 05 | [Reward Engine](05_REWARD_ENGINE.md) | Core Logic | Zones, multipliers, quality modifiers, LLM valuation, and the full calculation pipeline. |
-| 06 | [Achievements System](06_ACHIEVEMENTS.md) | Game Design | Templates, custom awards, rarity tiers, and the admin workflow. |
-| 07 | [Admin Panel & Web UI](07_ADMIN_PANEL.md) | Frontend | SvelteKit dashboard + FastAPI backend — zone management, achievement builder, manual awards, public analytics. |
+| 01 | [Vision & Philosophy](01_VISION.md) | Strategy | Synapse as a modular community OS — deployable by any community, configurable for any use case. |
+| 02 | [System Architecture](02_ARCHITECTURE.md) | Engineering | Four-service runtime, three-pillar data architecture (Event Lake → Ledger → Rules Engine), module system. |
+| 03 | [Configurable Economy](03_CONFIGURABLE_ECONOMY.md) | Economy | Admin-defined currencies, wallets, append-only transaction ledger. Replaces hardcoded XP/Stars/Gold. |
+| 03B | [Event Lake & Data Sources](03B_DATA_LAKE.md) | Data | Gateway event capture, retention policies, derived events. **[PENDING RESEARCH]** |
+| 04 | [Database Schema](04_DATABASE_SCHEMA.md) | Data | Every table, column, relationship, and the reasoning behind the design. *(v4.0 revision pending)* |
+| 05 | [Rules Engine](05_RULES_ENGINE.md) | Core Logic | Configurable trigger/condition/effect rules. Replaces hardcoded Reward Engine pipeline. |
+| 06 | [Milestones](06_MILESTONES.md) | Recognition | Requirement expressions against wallets + Event Lake. Replaces hardcoded Achievement system. |
+| 07 | [Admin Panel & Web UI](07_ADMIN_PANEL.md) | Frontend | SvelteKit dashboard — rule builder, currency management, module toggles, taxonomy editor. *(v4.0 revision pending)* |
 | 08 | [Deployment & Infrastructure](08_DEPLOYMENT.md) | DevOps | Docker, Docker Compose, Azure resource plan, and CI/CD pipeline. |
-| 09 | [Roadmap & Future Work](09_ROADMAP.md) | Planning | Phased delivery plan, stretch goals, and deferred decisions. |
-
----
-
-## Superseded Documents
-
-| Document | Status | Notes |
-|----------|--------|-------|
-| [SYNAPSE_DESIGN.md](SYNAPSE_DESIGN.md) | **Archived (v1.0)** | Original single-file TDD.  Superseded by this modular document set. |
+| 09 | [Roadmap](09_ROADMAP.md) | Planning | P0–P3.5 complete. P4 (Event Lake) → P5 (Ledger) → P6 (Rules Engine) → P7–P10. |
 
 ---
 
 ## How to Read These Documents
 
-- **Club Leads** should read **01 (Vision)**, **03 (Economy)**, and **06 (Achievements)**.
-- **Developers** should read **02 (Architecture)**, **04 (Schema)**, and **05 (Reward Engine)**.
+- **Community Operators** should read **01 (Vision)**, **03 (Economy)**, and **06 (Milestones)**.
+- **Developers** should read **02 (Architecture)**, **04 (Schema)**, and **05 (Rules Engine)**.
 - **DevOps / Deployers** should read **08 (Deployment)**.
 - **Everyone** should read **09 (Roadmap)** to know what's coming.
 
@@ -54,37 +47,33 @@ Each document contains a **Decisions** section at the bottom with entries format
 
 ---
 
-## v3.0 Amendment Notes
+## Version History
 
-- **Frontend stack replaced:** Streamlit removed entirely; replaced by SvelteKit 2 + Svelte 5 + Tailwind CSS 3.4 + Chart.js 4.
-- **API layer added:** FastAPI + uvicorn serves all REST endpoints; dashboard no longer accesses the database directly.
-- **Four-service topology:** `db`, `bot`, `api` (port 8000), `dashboard` (port 3000). Supersedes D02-04 (three services).
-- **Auth model replaced:** Streamlit OAuth session → Discord OAuth2 → FastAPI JWT (HS256 via python-jose). Supersedes D07-02, D07-04.
-- **New env vars:** `JWT_SECRET`, `FRONTEND_URL`, updated `DISCORD_REDIRECT_URI`.
-- **Dashboard Dockerfile:** Separate multi-stage Node.js 22 build for the SvelteKit frontend (adapter-node).
-- **`discord_avatar_hash`** added to users table for CDN avatar URL construction.
-- **`settings`** table added (key-value config stored in DB, managed via admin panel).
-- `synapse/dashboard/` deleted; replaced by `synapse/api/` (FastAPI) + `dashboard/` (SvelteKit).
-- Decisions D02-04, D07-02, D07-04 superseded. New decisions added for the stack migration.
+### v4.0 — Modular Community Platform
 
-## v2.2 Amendment Notes
+- **Vision pivot:** From "gamified student club framework" to "modular community operating system."
+- **Three pillars added:** Event Lake (data capture), Ledger (configurable currencies), Rules Engine (configurable logic).
+- **Module system:** Toggleable feature groups (Economy, Milestones, Analytics, Announcements, Seasons).
+- **Taxonomy system:** Admin-configurable labels for all internal terms.
+- **Preset system:** Bundled rule sets for zero-config start (Classic Gamification, Analytics Only, Minimal Engagement).
+- **Documents rewritten:** 01_VISION, 03_CONFIGURABLE_ECONOMY (new), 05_RULES_ENGINE (new), 06_MILESTONES (new), 09_ROADMAP.
+- **Documents revised:** 02_ARCHITECTURE.
+- **Documents pending revision:** 04_DATABASE_SCHEMA, 07_ADMIN_PANEL, 08_DEPLOYMENT.
+- **New document:** 03B_DATA_LAKE (stub, pending research results).
 
-- Added `admin_log` table for append-only audit trail on all config mutations.
-- Added `user_preferences` table for per-user announcement opt-out.
-- Added `guild_id` to `zones`, `seasons`, `achievement_templates`, `quests` and scoped unique constraints.
-- Replaced free-text `detail` in `activity_log` with structured `metadata` JSONB column (§4.6).
-- Added `source_system` and `source_event_id` to `activity_log` for idempotent insert.
-- Introduced Star anti-gaming measures: unique-reactor weighting, per-user per-target caps, diminishing returns.
-- Replaced 5-min TTL cache with PG LISTEN/NOTIFY for config cache invalidation.
-- Hardened admin authorization model (OAuth session gate, role check, rate limit).
-- Added announcement opt-out checks and channel throttle in achievement pipeline.
-- Amended Principle 3 (Public Celebration) with opt-out clause.
-- Promoted credibility items to P1/P2 roadmap.
+### v3.0 — SvelteKit + FastAPI
+
+- Frontend stack replaced: Streamlit → SvelteKit 2 + Svelte 5 + Tailwind CSS 3.4 + Chart.js 4.
+- API layer added: FastAPI + uvicorn serves all REST endpoints.
+- Four-service topology: `db`, `bot`, `api` (port 8000), `dashboard` (port 3000).
+- Auth model replaced: Streamlit OAuth session → Discord OAuth2 → FastAPI JWT.
+
+### v2.2
+
+- Added admin_log, user_preferences, guild_id scoping, structured metadata JSONB.
+- Star anti-gaming measures, PG LISTEN/NOTIFY cache, announcement opt-out.
 - 17 new decisions added across 9 documents.
 
-## v2.1 Amendment Notes
+### v2.1
 
-- Removed standalone API container from core runtime.
-- Standardized Admin UX on Streamlit (no FastAPI/HTMX admin stack in current scope).
-- Added season-aware economy direction for leaderboard fairness.
-- *(Superseded by v3.0 — standalone API and SvelteKit frontend now in production.)*
+- Removed standalone API container. Standardized on Streamlit. *(Superseded by v3.0.)*
