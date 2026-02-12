@@ -194,7 +194,7 @@ Achievement templates displayed as cards, filterable by category and rarity:
 
 ## 7.7 Public: Community Dashboard
 
-The public-facing pages form the "health monitor" for the club.  Any member
+The public-facing pages form the "health monitor" for the community.  Any member
 can visit the URL (no login required).
 
 ### Leaderboard (`/pulse/leaderboard`)

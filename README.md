@@ -191,7 +191,7 @@ Notes:
 Edit `config.yaml` for community-specific settings:
 
 ```yaml
-club_name: "Your Club"
+community_name: "Your Community"
 guild_id: 123456789          # Your Discord server ID
 admin_role_id: 987654321     # Admin role ID
 cooldown_seconds: 60

@@ -270,7 +270,7 @@ class Meta(commands.Cog, name="Meta"):
         if gh:
             embed.add_field(name="GitHub", value=f"[{gh}](https://github.com/{gh})", inline=True)
 
-        embed.set_footer(text=f"{data['season_name']} | {self.bot.cfg.club_name}")
+        embed.set_footer(text=f"{data['season_name']} | {self.bot.cfg.community_name}")
         await ctx.send(embed=embed)
 
     # -------------------------------------------------------------------
@@ -309,7 +309,7 @@ class Meta(commands.Cog, name="Meta"):
             description="\n".join(lines),
             color=discord.Color.gold(),
         )
-        embed.set_footer(text=self.bot.cfg.club_name)
+        embed.set_footer(text=self.bot.cfg.community_name)
         await ctx.send(embed=embed)
 
     # -------------------------------------------------------------------

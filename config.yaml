@@ -8,8 +8,8 @@
 # ============================================================================
 
 # --- Identity ---------------------------------------------------------------
-club_name: "Synapse Dev Club"
-club_motto: "Bridge the gap between chat and code."
+community_name: "Synapse Dev"
+community_motto: "Bridge the gap between chat and code."
 
 # --- Discord Bot Settings ---------------------------------------------------
 bot_prefix: "!"                  # Prefix for legacy text commands

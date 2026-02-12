@@ -58,7 +58,7 @@ def main() -> None:
 
     # 2. Soft configuration.
     cfg = load_config()
-    logger.info("Config loaded — Community: %s", cfg.club_name)
+    logger.info("Config loaded — Community: %s", cfg.community_name)
 
     # 3. Database.
     engine = create_db_engine()

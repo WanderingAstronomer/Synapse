@@ -9,8 +9,8 @@
 | Environment | Purpose | Database | Bot Token | URL |
 |-------------|---------|----------|-----------|-----|
 | **Local** | Development | Docker container (localhost:5432) | Dev bot token | localhost:5173 (dashboard), localhost:8000 (API) |
-| **Staging** | Pre-production testing | Azure PG Flexible (Burstable) | Staging bot token | staging.synapse.club |
-| **Production** | Live deployment | Azure PG Flexible (General) | Production bot token | synapse.club |
+| **Staging** | Pre-production testing | Azure PG Flexible (Burstable) | Staging bot token | staging.synapse.example.com |
+| **Production** | Live deployment | Azure PG Flexible (General) | Production bot token | synapse.example.com |
 
 ---
 
@@ -150,11 +150,11 @@ Azure Resource Group: synapse-prod
 │   │
 │   ├── App Service: synapse-api
 │   │   └── Docker: uvicorn synapse.api.main:app
-│   │   └── Custom domain: api.synapse.club
+│   │   └── Custom domain: api.synapse.example.com
 │   │
 │   └── App Service: synapse-dashboard
 │       └── Docker: node build (SvelteKit)
-│       └── Custom domain: synapse.club
+│       └── Custom domain: synapse.example.com
 │
 ├── PostgreSQL Flexible Server (Burstable B1ms)
 │   └── Database: synapse

@@ -81,7 +81,7 @@ class SynapseBot(commands.Bot):
         super().__init__(
             command_prefix=cfg.bot_prefix,
             intents=intents,
-            description=f"{cfg.club_name} — {cfg.club_motto}",
+            description=f"{cfg.community_name} — {cfg.community_motto}",
         )
 
         # Attach shared state so Cogs can read it via self.bot.*
@@ -172,7 +172,7 @@ class SynapseBot(commands.Bot):
                 new_ch = await g.create_text_channel(
                     name=ACHIEVEMENTS_CHANNEL_NAME,
                     topic=(
-                        f"\U0001f3c6 {self.cfg.club_name} achievements, level-ups, "
+                        f"\U0001f3c6 {self.cfg.community_name} achievements, level-ups, "
                         "and celebrations \u2014 powered by Synapse"
                     ),
                     reason="Synapse: auto-created unified notification channel",

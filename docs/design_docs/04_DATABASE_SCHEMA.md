@@ -128,7 +128,7 @@
 
 ## 4.3 Table Definitions
 
-### `users` — Club Member Profiles
+### `users` — Community Member Profiles
 
 | Column | Type | Constraints | Description |
 |--------|------|-------------|-------------|

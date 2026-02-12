@@ -13,7 +13,7 @@ Usage::
     from synapse.config import load_config
 
     cfg = load_config()          # reads ./config.yaml by default
-    print(cfg.club_name)         # "Synapse Dev Club"
+    print(cfg.community_name)    # "Synapse Dev"
     print(cfg.guild_id)          # 1468816181854081229
 """
 
@@ -39,8 +39,8 @@ class SynapseConfig:
     """
 
     # Identity
-    club_name: str
-    club_motto: str
+    community_name: str
+    community_motto: str
 
     # Discord
     bot_prefix: str
@@ -86,8 +86,8 @@ def load_config(path: str | Path = "config.yaml") -> SynapseConfig:
         raw: dict = yaml.safe_load(fh)
 
     return SynapseConfig(
-        club_name=raw["club_name"],
-        club_motto=raw["club_motto"],
+        community_name=raw["community_name"],
+        community_motto=raw["community_motto"],
         bot_prefix=raw["bot_prefix"],
         guild_id=int(raw["guild_id"]),
         dashboard_port=int(raw["dashboard_port"]),
