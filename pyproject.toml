@@ -1,6 +1,6 @@
 [project]
 name = "synapse"
-version = "0.1.0"
+version = "1.0.0"
 description = "A modular community operating system for Discord — captures activity, drives engagement through configurable economies and rules, and surfaces insights through a real-time dashboard."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -9,11 +9,10 @@ dependencies = [
     "psycopg2-binary>=2.9.11",
     "python-dotenv>=1.2.1",
     "pyyaml>=6.0.3",
-    "requests>=2.32.0",
     "sqlalchemy>=2.0.46",
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.34.0",
-    "python-jose[cryptography]>=3.3.0",
+    "PyJWT[crypto]>=2.10.0",
     "httpx>=0.28.0",
     "alembic>=1.18.4",
 ]
@@ -25,7 +24,7 @@ dev = [
     "mypy>=1.19.1",
     "types-PyYAML>=6.0.12.20250915",
     "types-psycopg2>=2.9.21.20251012",
-    "types-requests>=2.32.4.20260107",
+
 ]
 
 [tool.ruff]
