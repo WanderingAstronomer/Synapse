@@ -79,7 +79,7 @@ Current (v3.0) trigger types:
 v4.0 adds compound requirements, streak tracking, and requirement
 expressions against the Ledger and Event Lake.
 
-11 seed milestones included (First Steps, Rising Star, Chatterbox, etc.)
+11 default milestones included (First Steps, Rising Star, Chatterbox, etc.)
 
 ## Bot Commands
 
@@ -170,21 +170,29 @@ uv run pytest tests/ -v
 docker compose up --build
 ```
 
-### Docker Compose (Single App Container)
-
-Run bot + API + dashboard in one container (plus PostgreSQL):
+### Reality Check (30s)
 
 ```bash
-docker compose -f docker-compose.single.yml up -d --build
+docker compose ps
+curl http://localhost:8000/api/health
+curl -I http://localhost:3000
+docker compose logs api --tail=50
 ```
 
-Services in this mode:
-- `db` — PostgreSQL
-- `synapse` — all-in-one app container (Discord bot + FastAPI + Svelte dashboard)
+### First-Run Setup
 
-Notes:
-- Exposes `3000` (dashboard) and `8000` (API) from the same container.
-- Uses `Dockerfile.single` and startup script `docker/start-all.sh`.
+After starting the stack for the first time:
+
+1. The bot connects to Discord and captures your server's channel layout.
+2. Navigate to `http://localhost:3000` and sign in with Discord.
+3. You'll be redirected to the **Setup Wizard** which shows the detected
+   guild structure (categories, channels, voice channels).
+4. Click **Run Bootstrap** to auto-create zones from categories, map
+   channels, create a default season, and write baseline settings.
+5. Once complete, the normal admin dashboard unlocks.
+
+Bootstrap is idempotent — you can re-run it safely from **Admin → Setup**
+if you add new channels or categories to your Discord server.
 
 ### Configuration
 
@@ -222,7 +230,7 @@ synapse/
 │       └── admin.py         # /award, /create-achievement, /grant-achievement
 ├── database/
 │   ├── engine.py            # SQLAlchemy engine + async bridge
-│   └── models.py            # 12 tables (SQLAlchemy 2.0 Mapped)
+│   └── models.py            # 15 tables (SQLAlchemy 2.0 Mapped)
 ├── engine/
 │   ├── events.py            # SynapseEvent dataclass + base XP/Stars
 │   ├── reward.py            # Pure reward calculation pipeline
@@ -231,7 +239,8 @@ synapse/
 ├── services/
 │   ├── reward_service.py    # Event persistence + reward application
 │   ├── admin_service.py     # Audit-logged admin mutations
-│   └── seed.py              # Default data seeder
+│   ├── setup_service.py     # First-run bootstrap + guild discovery
+│   └── channel_service.py   # Incremental channel-to-zone mapping
 └── config.py                # YAML config loader
 
 dashboard/                   # SvelteKit frontend (separate Node project)
@@ -248,6 +257,7 @@ dashboard/                   # SvelteKit frontend (separate Node project)
 │       ├── achievements/+page.svelte # Achievement card grid with filters
 │       ├── auth/callback/+page.svelte # OAuth token handler
 │       └── admin/                   # Auth-guarded admin pages
+│           ├── setup/+page.svelte
 │           ├── zones/+page.svelte
 │           ├── achievements/+page.svelte
 │           ├── awards/+page.svelte
@@ -267,7 +277,8 @@ dashboard/                   # SvelteKit frontend (separate Node project)
 - Anti-gaming suite (self-reaction filter, unique-reactor weighting, diminishing returns)
 - Idempotent event persistence (ON CONFLICT DO NOTHING)
 - PG LISTEN/NOTIFY cache invalidation (no Redis)
-- Achievement system (4 trigger types, 11 seed achievements)
+- Achievement system (4 trigger types, auto-discovered from presets)
+- First-run setup wizard with auto guild layout detection
 - Seasonal stats with season rollover
 - FastAPI REST API with typed endpoints
 - SvelteKit dashboard with cyber-industrial aesthetic + Chart.js
@@ -278,8 +289,7 @@ dashboard/                   # SvelteKit frontend (separate Node project)
 - Thread creation tracking
 - Discord avatar integration (CDN URL construction)
 
-### 📋 Planned (v4.0 — P4–P8)
-- **Event Lake** — Gateway event capture + retention policies
+### 📋 Planned (v4.0 — P5–P8)
 - **Configurable Currencies** — Admin-defined currencies, wallets, transaction ledger
 - **Rules Engine** — IFTTT-style configurable rules replacing hardcoded pipeline
 - **Milestones v2** — Compound requirements against Ledger + Event Lake
