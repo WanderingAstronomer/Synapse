@@ -6,8 +6,8 @@
 
 ```
 ┌─────────────┐      ┌──────────────┐      ┌─────────────────┐
-│  Discord     │◄────►│  Synapse Bot │◄────►│  PostgreSQL 16  │
-│  Gateway     │      │  (discord.py)│      │  (JSONB, LISTEN │
+│  Discord    │◄────►│  Synapse Bot │◄────►│  PostgreSQL 16  │
+│  Gateway    │      │  (discord.py)│      │  (JSONB, LISTEN │
 └─────────────┘      └──────┬───────┘      │   /NOTIFY)      │
                             │              └──────┬──────────┘
                      ┌──────┴───────┐             │
