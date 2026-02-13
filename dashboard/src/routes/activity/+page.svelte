@@ -6,6 +6,7 @@
 	import { timeAgo, eventTypeLabel, eventColor, fmt } from '$lib/utils';
 	import { Chart, registerables } from 'chart.js';
 	import SynapseLoader from '$lib/components/SynapseLoader.svelte';
+	import { primaryCurrency } from '$lib/stores/currency';
 
 	Chart.register(...registerables);
 
@@ -15,6 +16,7 @@
 	let chartCanvas = $state<HTMLCanvasElement | null>(null);
 	let chart: Chart | null = null;
 	let eventFilter = $state('');
+	let allEventTypes = $state<string[]>([]);
 
 	const DAY_OPTIONS = [7, 14, 30, 90];
 
@@ -22,6 +24,10 @@
 		loading = true;
 		try {
 			data = await api.getActivity(days, 200, eventFilter || undefined);
+			// Populate all known event types on the first unfiltered load
+			if (!eventFilter && data) {
+				allEventTypes = [...new Set(data.events.map((e) => e.event_type))].sort();
+			}
 		} catch (e) {
 			console.error('Activity load failed:', e);
 		} finally {
@@ -41,18 +47,21 @@
 		load();
 	}
 
-	// Build chart when data changes
+	// Build chart when data changes — force full destroy + recreate
 	$effect(() => {
 		if (!data?.daily || !chartCanvas) return;
 
-		if (chart) chart.destroy();
+		// Snapshot the data to sever reactivity tracking
+		const daily = data.daily;
 
-		const days_sorted = Object.keys(data.daily).sort();
-		const eventTypes = [...new Set(days_sorted.flatMap((d) => Object.keys(data!.daily[d])))];
+		if (chart) { chart.destroy(); chart = null; }
+
+		const days_sorted = Object.keys(daily).sort();
+		const eventTypes = [...new Set(days_sorted.flatMap((d) => Object.keys(daily[d])))];
 
 		const datasets = eventTypes.map((et) => ({
 			label: eventTypeLabel(et),
-			data: days_sorted.map((d) => data!.daily[d][et] || 0),
+			data: days_sorted.map((d) => daily[d][et] || 0),
 			backgroundColor: eventColor(et) + '80',
 			borderColor: eventColor(et),
 			borderWidth: 1,
@@ -101,11 +110,6 @@
 			},
 		});
 	});
-
-	// Collect unique event types from data
-	const eventTypes = $derived(
-		data ? [...new Set(data.events.map((e) => e.event_type))].sort() : []
-	);
 </script>
 
 <svelte:head><title>Activity — Synapse</title></svelte:head>
@@ -136,7 +140,7 @@
 	>
 		All
 	</button>
-	{#each eventTypes as et}
+	{#each allEventTypes as et}
 		<button
 			class="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors
 				{eventFilter === et ? 'bg-brand-600 text-white' : 'bg-surface-200 text-zinc-400 hover:text-zinc-200'}"
@@ -180,7 +184,7 @@
 							</span>
 						</div>
 						{#if event.xp_delta > 0}
-							<span class="text-xs text-brand-400">+{event.xp_delta} XP</span>
+						<span class="text-xs text-brand-400">+{event.xp_delta} {$primaryCurrency}</span>
 						{/if}
 					</div>
 					<span class="text-xs text-zinc-500 whitespace-nowrap">{timeAgo(event.timestamp)}</span>

@@ -88,6 +88,12 @@ class Voice(commands.Cog, name="Voice"):
         after: discord.VoiceState,
     ) -> None:
         """Track voice join/leave events."""
+        before_ch = getattr(before.channel, "name", "None")
+        after_ch = getattr(after.channel, "name", "None")
+        logger.info(
+            "Gateway event: VOICE_STATE %s (%s → %s, bot=%s)",
+            member.name, before_ch, after_ch, member.bot,
+        )
         try:
             await self._handle_voice_update(member, before, after)
         except Exception:

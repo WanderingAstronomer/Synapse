@@ -17,8 +17,8 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
-from sqlalchemy import Engine, case, func, select, text
+from pydantic import BaseModel
+from sqlalchemy import Engine, func, select
 from sqlalchemy.orm import Session
 
 from synapse.api.deps import get_current_admin, get_engine, get_session, get_setting

@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { api, type AdminSetting } from '$lib/api';
 	import { flash } from '$lib/stores/flash';
+	import { currencyLabels, primaryCurrency, secondaryCurrency } from '$lib/stores/currency';
 	import { capitalize } from '$lib/utils';
 
 	let settings = $state<AdminSetting[]>([]);
@@ -10,48 +11,48 @@
 	let saving = $state(false);
 	let filterCategory = $state('');
 
-	/** Human-friendly labels for snake_case settings keys */
-	const FRIENDLY_LABELS: Record<string, string> = {
-		// Economy
-		base_xp_message:         'Base XP per Message',
-		base_xp_reaction:        'Base XP per Reaction',
-		base_xp_voice_tick:      'Base XP per Voice Minute',
-		base_xp_thread_create:   'Base XP for Creating a Thread',
-		xp_per_level_base:       'XP Needed for Level 2',
-		xp_per_level_exponent:   'Level Curve Steepness',
-		gold_per_level:          'Gold Earned per Level Up',
-		star_to_gold_ratio:      'Stars-to-Gold Exchange Rate',
-		// Anti-gaming
-		anti_gaming_velocity_cap:       'Spam Throttle (max events/min)',
-		anti_gaming_cooldown_seconds:   'Cooldown Between Rewards (sec)',
-		anti_gaming_min_message_length: 'Min Message Length for XP',
-		anti_gaming_duplicate_window:   'Duplicate Detection Window (sec)',
-		// Dashboard
-		dashboard_title:         'Dashboard Title',
-		dashboard_subtitle:      'Dashboard Subtitle',
-		dashboard_hero_emoji:    'Hero Banner Emoji',
-		// Discord
-		guild_id:                'Discord Server ID',
-		announce_channel_id:     'Announcement Channel',
-		bot_status_text:         'Bot Status Message',
-		// Seasons
-		season_duration_days:    'Season Length (days)',
-		season_auto_roll:        'Auto-Roll Seasons',
-	};
+	/** Human-friendly labels keyed to actual setting keys from the backend.
+	 *  Uses reactive currency names so labels cascade when renamed. */
+	const friendlyLabel = $derived.by(() => {
+		const p = $primaryCurrency;
+		const s = $secondaryCurrency;
+		const map: Record<string, string> = {
+			// Economy
+			'economy.xp_per_message':         `Base ${p} per Message`,
+			'economy.xp_per_reaction':        `Base ${p} per Reaction`,
+			'economy.xp_per_voice_minute':    `Base ${p} per Voice Minute`,
+			'economy.gold_per_message':       `Base ${s} per Message`,
+			'economy.message_cooldown_seconds': 'Message Cooldown (sec)',
+			'economy.daily_xp_cap':           `Daily ${p} Cap`,
+			'economy.daily_gold_cap':         `Daily ${s} Cap`,
+			'economy.primary_currency_name':  'Primary Currency Name',
+			'economy.secondary_currency_name': 'Secondary Currency Name',
+			// Anti-gaming
+			'anti_gaming.min_message_length':        `Min Message Length for ${p}`,
+			'anti_gaming.unique_reactor_threshold':   'Unique Reactors for Full Value',
+			'anti_gaming.diminishing_returns_after':  'Diminishing Returns After (msgs)',
+			// Quality
+			'quality.code_block_bonus':        'Code Block Multiplier',
+			'quality.link_bonus':              'Link Multiplier',
+			'quality.long_message_threshold':  'Long Message Length (chars)',
+			'quality.long_message_bonus':      'Long Message Multiplier',
+			// Announcements
+			'announcements.achievement_channel_enabled': 'Post Achievements & Level-Ups',
+			'announcements.leaderboard_public':          'Public Leaderboard Visible',
+		};
+		return (key: string) => map[key] || key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+	});
 
 	/** Category display config */
 	const CATEGORY_META: Record<string, { icon: string; label: string; description: string; danger?: boolean }> = {
-		economy:      { icon: '💰', label: 'Economy',           description: 'XP rates, leveling curve, and gold rewards' },
-		anti_gaming:  { icon: '🛡️', label: 'Anti-Gaming',       description: 'Spam protection and reward throttling' },
-		dashboard:    { icon: '🎨', label: 'Dashboard',         description: 'Branding, titles, and display settings' },
-		discord:      { icon: '🤖', label: 'Discord',           description: 'Bot configuration and server integration' },
-		seasons:      { icon: '📅', label: 'Seasons',           description: 'Season duration and rollover behavior' },
-		dangerous:    { icon: '⚠️', label: 'Danger Zone',       description: 'Settings that can significantly affect the game', danger: true },
+		economy:        { icon: '💰', label: 'Economy',         description: 'Currency rates, leveling curve, and daily caps' },
+		anti_gaming:    { icon: '🛡️', label: 'Anti-Gaming',     description: 'Spam protection and reward throttling' },
+		quality:        { icon: '✨', label: 'Quality',          description: 'Bonus multipliers for high-quality content' },
+		announcements:  { icon: '📣', label: 'Announcements',   description: 'Achievement and level-up notification settings' },
+		display:        { icon: '🎨', label: 'Display',          description: 'Branding, titles, and UI settings' },
+		setup:          { icon: '🔧', label: 'Setup',            description: 'Bootstrap and initialization state (read-only)' },
+		dangerous:      { icon: '⚠️', label: 'Danger Zone',     description: 'Settings that can significantly affect the game', danger: true },
 	};
-
-	function friendlyLabel(key: string): string {
-		return FRIENDLY_LABELS[key] || key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-	}
 
 	async function load() {
 		try {
@@ -107,6 +108,8 @@
 		try {
 			await api.admin.updateSettings(changed);
 			flash.success(`${changed.length} setting(s) updated`);
+			// Refresh the global currency labels so all UI updates instantly
+			await currencyLabels.refresh();
 			await load();
 		} catch (e: any) { flash.error(e.message); }
 		finally { saving = false; }

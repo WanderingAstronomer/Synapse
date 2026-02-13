@@ -24,6 +24,13 @@ from synapse.database.models import (
     ZoneMultiplier,
 )
 from synapse.services import admin_service, reward_service, settings_service
+from synapse.services.setup_service import bootstrap_guild, get_setup_status, GuildSnapshot, GUILD_SNAPSHOT_KEY
+from synapse.services.log_buffer import (
+    get_logs,
+    get_current_level,
+    set_capture_level,
+    VALID_LEVELS,
+)
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -439,3 +446,133 @@ def get_audit_log(
             for r in rows
         ],
     }
+
+
+# ---------------------------------------------------------------------------
+# Setup / Bootstrap
+# ---------------------------------------------------------------------------
+@router.get("/setup/status")
+def setup_status(
+    admin: dict = Depends(get_current_admin),
+    engine=Depends(get_engine),
+):
+    """Return the current first-run setup state."""
+    return get_setup_status(engine)
+
+
+@router.post("/setup/bootstrap")
+def run_bootstrap(
+    admin: dict = Depends(get_current_admin),
+    engine=Depends(get_engine),
+    cfg: SynapseConfig = Depends(get_config),
+):
+    """Trigger first-run guild bootstrap (idempotent).
+
+    Creates zones from Discord categories, maps channels, creates a
+    default season, and writes baseline settings.
+    """
+    result = bootstrap_guild(engine, cfg.guild_id)
+    if not result.success:
+        raise HTTPException(400, detail={
+            "message": "Bootstrap failed",
+            "warnings": result.warnings,
+        })
+    return {
+        "success": True,
+        "zones_created": result.zones_created,
+        "zones_existing": result.zones_existing,
+        "channels_mapped": result.channels_mapped,
+        "channels_existing": result.channels_existing,
+        "season_created": result.season_created,
+        "settings_written": result.settings_written,
+        "warnings": result.warnings,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Live Logs
+# ---------------------------------------------------------------------------
+@router.get("/logs")
+def get_live_logs(
+    tail: int = Query(200, ge=1, le=5000),
+    level: str | None = Query(None),
+    logger_filter: str | None = Query(None, alias="logger"),
+    admin: dict = Depends(get_current_admin),
+):
+    """Return recent log entries from the in-memory ring buffer."""
+    entries = get_logs(tail=tail, level=level, logger_filter=logger_filter)
+    return {
+        "entries": entries,
+        "total": len(entries),
+        "capture_level": get_current_level(),
+        "valid_levels": list(VALID_LEVELS),
+    }
+
+
+@router.put("/logs/level")
+def change_log_level(
+    body: dict,
+    admin: dict = Depends(get_current_admin),
+):
+    """Change the capture level of the ring-buffer handler on-the-fly."""
+    level_name = body.get("level", "").upper()
+    if level_name not in VALID_LEVELS:
+        raise HTTPException(400, detail=f"Invalid level. Must be one of: {', '.join(VALID_LEVELS)}")
+    new_level = set_capture_level(level_name)
+    return {"level": new_level}
+
+
+# ---------------------------------------------------------------------------
+# Name Resolution: user IDs → names, channel IDs → names
+# ---------------------------------------------------------------------------
+class ResolveRequest(BaseModel):
+    user_ids: list[str] = Field(default_factory=list)
+    channel_ids: list[str] = Field(default_factory=list)
+
+
+@router.post("/resolve-names")
+def resolve_names(
+    body: ResolveRequest,
+    admin: dict = Depends(get_current_admin),
+    session: Session = Depends(get_session),
+    engine=Depends(get_engine),
+):
+    """Resolve Discord Snowflake IDs to human-readable names.
+
+    Users are resolved from the ``users`` table; channels from the
+    stored guild snapshot (``guild.snapshot`` setting).
+    """
+    result: dict[str, dict[str, str]] = {"users": {}, "channels": {}}
+
+    # --- resolve users ---
+    if body.user_ids:
+        int_ids = []
+        for uid in body.user_ids:
+            try:
+                int_ids.append(int(uid))
+            except (ValueError, TypeError):
+                pass
+        if int_ids:
+            rows = session.scalars(
+                select(User).where(User.id.in_(int_ids))
+            ).all()
+            for u in rows:
+                result["users"][str(u.id)] = u.discord_name
+
+    # --- resolve channels from guild snapshot ---
+    if body.channel_ids:
+        from synapse.database.models import Setting
+
+        snap_row = session.get(Setting, GUILD_SNAPSHOT_KEY)
+        if snap_row and snap_row.value_json:
+            try:
+                snapshot = GuildSnapshot.from_json(snap_row.value_json)
+                ch_map = {str(ch.id): ch.name for ch in snapshot.channels}
+                for cid in body.channel_ids:
+                    if cid in ch_map:
+                        result["channels"][cid] = ch_map[cid]
+            except Exception:
+                pass
+
+    return result
+

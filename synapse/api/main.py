@@ -18,9 +18,11 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from synapse.api.auth import router as auth_router
 from synapse.api.deps import get_engine
+from synapse.api.rate_limit import AdminRateLimitMiddleware
 from synapse.api.routes.admin import router as admin_router
 from synapse.api.routes.event_lake import router as event_lake_router
 from synapse.api.routes.public import router as public_router
+from synapse.services.log_buffer import install_handler
 
 load_dotenv()
 
@@ -30,6 +32,11 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup/shutdown lifecycle — warm the DB engine."""
+    # Ensure our log handler is attached to Uvicorn loggers.
+    # We do this here (after startup) because Uvicorn reconfigures logging
+    # when it starts, often wiping handlers added at import time.
+    install_handler()
+
     engine = get_engine()
     logger.info("Synapse API started — engine ready (%s)", engine.url.database)
     yield
@@ -55,6 +62,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Rate limit admin mutations (30/min per admin — §7.8)
+app.add_middleware(AdminRateLimitMiddleware)
+
 # Mount routers
 app.include_router(auth_router, prefix="/api")
 app.include_router(public_router, prefix="/api")
@@ -65,3 +75,12 @@ app.include_router(event_lake_router, prefix="/api")
 @app.get("/api/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/api/health/bot")
+def bot_health():
+    """Return the bot's heartbeat status."""
+    from synapse.services.setup_service import get_bot_heartbeat
+
+    engine = get_engine()
+    return get_bot_heartbeat(engine)

@@ -156,6 +156,11 @@ def get_activity(
             func.count().label("cnt"),
         )
         .where(ActivityLog.timestamp >= since)
+    )
+    if event_type:
+        daily_query = daily_query.where(ActivityLog.event_type == event_type)
+    daily_query = (
+        daily_query
         .group_by("day", ActivityLog.event_type)
         .order_by("day")
     )
@@ -289,6 +294,8 @@ def get_public_settings(session: Session = Depends(get_session)):
         "dashboard_cta_label",
         "dashboard_cta_url",
         "dashboard_hero_emoji",
+        "economy.primary_currency_name",
+        "economy.secondary_currency_name",
     ]
     rows = session.scalars(
         select(Setting).where(Setting.key.in_(public_keys))
@@ -303,5 +310,7 @@ def get_public_settings(session: Session = Depends(get_session)):
     result.setdefault("dashboard_subtitle", "Community engagement at a glance")
     result.setdefault("dashboard_leaderboard_page_size", 20)
     result.setdefault("dashboard_activity_default_days", 30)
+    result.setdefault("economy.primary_currency_name", "XP")
+    result.setdefault("economy.secondary_currency_name", "Gold")
 
     return result

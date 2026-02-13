@@ -5,6 +5,7 @@
 	import RarityBadge from '$lib/components/RarityBadge.svelte';
 	import EmptyState from '$lib/components/EmptyState.svelte';
 	import { capitalize } from '$lib/utils';
+	import { primaryCurrency, secondaryCurrency } from '$lib/stores/currency';
 	import SynapseLoader from '$lib/components/SynapseLoader.svelte';
 
 	let achievements = $state<AdminAchievement[]>([]);
@@ -135,11 +136,11 @@
 				<input id="ach-req-value" class="input" type="number" bind:value={f.requirement_value} />
 			</div>
 			<div>
-				<label class="label" for="ach-xp">XP Reward</label>
+				<label class="label" for="ach-xp">{$primaryCurrency} Reward</label>
 				<input id="ach-xp" class="input" type="number" bind:value={f.xp_reward} />
 			</div>
 			<div>
-				<label class="label" for="ach-gold">Gold Reward</label>
+				<label class="label" for="ach-gold">{$secondaryCurrency} Reward</label>
 				<input id="ach-gold" class="input" type="number" bind:value={f.gold_reward} />
 			</div>
 			<div>
@@ -185,8 +186,8 @@
 						<td class="px-4 py-3 text-zinc-400">{capitalize(a.category)}</td>
 						<td class="px-4 py-3"><RarityBadge rarity={a.rarity} /></td>
 						<td class="px-4 py-3 text-right text-xs">
-							{#if a.xp_reward > 0}<span class="text-brand-400">{a.xp_reward} XP</span>{/if}
-							{#if a.gold_reward > 0}<span class="text-gold-400 ml-1">{a.gold_reward}G</span>{/if}
+							{#if a.xp_reward > 0}<span class="text-brand-400">{a.xp_reward} {$primaryCurrency}</span>{/if}
+							{#if a.gold_reward > 0}<span class="text-gold-400 ml-1">{a.gold_reward} {$secondaryCurrency}</span>{/if}
 						</td>
 						<td class="px-4 py-3 text-center">
 							<span class="badge {a.active ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'}">

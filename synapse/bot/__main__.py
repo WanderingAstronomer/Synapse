@@ -7,10 +7,12 @@ Wiring:
 2. Load config.yaml (soft settings).
 3. Create the SQLAlchemy engine and ensure tables exist.
 4. Build and warm the ConfigCache (in-memory config from DB).
-5. Seed default data if needed.
-6. Start the PG LISTEN/NOTIFY background listener.
-7. Create the SynapseBot and hand it config + engine + cache.
-8. Start the bot (blocking — runs the asyncio event loop).
+5. Start the PG LISTEN/NOTIFY background listener.
+6. Create the SynapseBot and hand it config + engine + cache.
+7. Start the bot (blocking — runs the asyncio event loop).
+
+First-run initialisation (zones, channels, settings) is handled by the
+admin dashboard setup wizard, not by startup seed files.
 
 Run with::
 
@@ -29,7 +31,7 @@ from synapse.bot.core import SynapseBot
 from synapse.config import load_config
 from synapse.database.engine import create_db_engine, init_db
 from synapse.engine.cache import ConfigCache
-from synapse.services.seed import seed_database
+from synapse.services.log_buffer import install_handler
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -40,6 +42,9 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 logger = logging.getLogger("synapse")
+
+# Capture all logs into the in-memory ring buffer for the admin log viewer
+install_handler()
 
 
 def main() -> None:
@@ -64,20 +69,16 @@ def main() -> None:
     engine = create_db_engine()
     init_db(engine)
 
-    # 4. Seed default zones, achievements, and season (idempotent).
-    if cfg.guild_id:
-        seed_database(engine, cfg.guild_id)
-
-    # 5. Build and warm the ConfigCache.
+    # 4. Build and warm the ConfigCache.
     cache = ConfigCache(engine)
 
-    # 6. Start PG LISTEN/NOTIFY background thread.
+    # 5. Start PG LISTEN/NOTIFY background thread.
     cache.start_listener()
 
-    # 7. Bot.
+    # 6. Bot.
     bot = SynapseBot(cfg=cfg, engine=engine, cache=cache)
 
-    # 8. Run (blocks until Ctrl+C or SIGTERM).
+    # 7. Run (blocks until Ctrl+C or SIGTERM).
     logger.info("Starting Synapse bot…")
     try:
         bot.run(token, log_handler=None)

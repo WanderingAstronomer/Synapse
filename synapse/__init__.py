@@ -12,7 +12,7 @@ Package layout::
     ├── config.py          # YAML → typed Python config
     ├── database/
     │   ├── engine.py      # SQLAlchemy engine + async helper
-    │   └── models.py      # All ORM models (12+ tables)
+    │   └── models.py      # All ORM models (15 tables)
     ├── bot/
     │   ├── core.py        # Bot subclass, cog loader
     │   └── cogs/
@@ -31,12 +31,11 @@ Package layout::
     │   └── cache.py       # In-memory config cache + PG LISTEN/NOTIFY
     ├── services/
     │   ├── reward_service.py  # Event persistence + reward application
-    │   ├── admin_service.py   # Audit-logged admin mutations
-    │   └── seed.py            # Default data seeder
+    │   └── admin_service.py   # Audit-logged admin mutations
     └── api/
         ├── main.py        # FastAPI app
         ├── auth.py        # Discord OAuth2 → JWT
         └── routes/        # Public + admin REST endpoints
 """
 
-__version__ = "0.1.0"
+__version__ = "1.0.0"

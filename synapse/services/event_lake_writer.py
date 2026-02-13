@@ -26,7 +26,7 @@ from sqlalchemy import Engine, select, text
 from sqlalchemy.exc import IntegrityError
 
 from synapse.database.engine import get_session
-from synapse.database.models import EventCounter, EventLake, Setting
+from synapse.database.models import EventLake, Setting
 
 logger = logging.getLogger(__name__)
 

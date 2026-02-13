@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 	import { auth, isAdmin } from '$lib/stores/auth';
 
@@ -11,22 +12,19 @@
 	];
 
 	const adminLinks = [
+		{ href: '/admin/setup', label: 'Setup', icon: '🔧' },
 		{ href: '/admin/zones', label: 'Zones', icon: '🗺️' },
 		{ href: '/admin/achievements', label: 'Achievements', icon: '🎖️' },
 		{ href: '/admin/awards', label: 'Awards', icon: '🎁' },
 		{ href: '/admin/data-sources', label: 'Event Lake', icon: '🗄️' },
 		{ href: '/admin/settings', label: 'Settings', icon: '⚙️' },
 		{ href: '/admin/audit', label: 'Audit Log', icon: '📋' },
+		{ href: '/admin/logs', label: 'Logs', icon: '🖥️' },
 	];
 
-	interface Props {
-		open?: boolean;
-	}
-
-	let { open = $bindable(true) }: Props = $props();
-
-	type ApiHealth = 'checking' | 'online' | 'offline';
-	let apiHealth = $state<ApiHealth>('checking');
+	type HealthStatus = 'checking' | 'online' | 'offline';
+	let apiHealth = $state<HealthStatus>('checking');
+	let botHealth = $state<HealthStatus>('checking');
 
 	async function checkApiHealth() {
 		try {
@@ -37,9 +35,27 @@
 		}
 	}
 
+	async function checkBotHealth() {
+		try {
+			const response = await fetch('/api/health/bot', { cache: 'no-store' });
+			if (response.ok) {
+				const data = await response.json();
+				botHealth = data.status === 'online' ? 'online' : 'offline';
+			} else {
+				botHealth = 'offline';
+			}
+		} catch {
+			botHealth = 'offline';
+		}
+	}
+
 	onMount(() => {
 		checkApiHealth();
-		const intervalId = window.setInterval(checkApiHealth, 30000);
+		checkBotHealth();
+		const intervalId = window.setInterval(() => {
+			checkApiHealth();
+			checkBotHealth();
+		}, 30000);
 		return () => window.clearInterval(intervalId);
 	});
 
@@ -49,19 +65,8 @@
 	}
 </script>
 
-<!-- Mobile overlay -->
-{#if open}
-	<button
-		class="fixed inset-0 bg-black/50 z-30 lg:hidden"
-		onclick={() => (open = false)}
-		aria-label="Close sidebar"
-	></button>
-{/if}
-
 <aside
-	class="fixed top-0 left-0 z-40 h-screen w-64 bg-surface-50 border-r border-surface-300
-		transform transition-transform duration-200 ease-in-out
-		{open ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0 lg:static lg:z-auto"
+	class="sticky top-0 h-screen w-72 shrink-0 bg-surface-50 border-r border-surface-300"
 >
 	<div class="flex flex-col h-full">
 		<!-- Brand -->
@@ -80,7 +85,6 @@
 				<a
 					href={link.href}
 					class="nav-link {isActive(link.href, $page.url.pathname) ? 'nav-link-active' : ''}"
-					onclick={() => { if (window.innerWidth < 1024) open = false; }}
 				>
 					<span class="text-base">{link.icon}</span>
 					<span>{link.label}</span>
@@ -94,7 +98,6 @@
 					<a
 						href={link.href}
 						class="nav-link {isActive(link.href, $page.url.pathname) ? 'nav-link-active' : ''}"
-						onclick={() => { if (window.innerWidth < 1024) open = false; }}
 					>
 						<span class="text-base">{link.icon}</span>
 						<span>{link.label}</span>
@@ -105,10 +108,14 @@
 
 		<!-- Footer -->
 		<div class="px-4 py-4 border-t border-surface-300">
-			<div class="mb-3">
+			<div class="flex flex-wrap gap-2 mb-3">
 				<span class="inline-flex items-center gap-1.5 rounded-full border border-surface-300 px-2 py-1 text-[10px] text-zinc-400">
 					<span class="h-1.5 w-1.5 rounded-full {apiHealth === 'online' ? 'bg-emerald-400' : apiHealth === 'offline' ? 'bg-red-400' : 'bg-zinc-500'}"></span>
 					{apiHealth === 'online' ? 'API Online' : apiHealth === 'offline' ? 'API Offline' : 'API Checking'}
+				</span>
+				<span class="inline-flex items-center gap-1.5 rounded-full border border-surface-300 px-2 py-1 text-[10px] text-zinc-400">
+					<span class="h-1.5 w-1.5 rounded-full {botHealth === 'online' ? 'bg-emerald-400' : botHealth === 'offline' ? 'bg-red-400' : 'bg-zinc-500'}"></span>
+					{botHealth === 'online' ? 'Bot Online' : botHealth === 'offline' ? 'Bot Offline' : 'Bot Checking'}
 				</span>
 			</div>
 			{#if $auth}
@@ -125,7 +132,7 @@
 						<p class="text-[10px] text-brand-400">Admin</p>
 					</div>
 				</div>
-				<button class="btn-secondary w-full text-xs justify-center" onclick={() => auth.logout()}>
+				<button class="btn-secondary w-full text-xs justify-center" onclick={() => { auth.logout(); goto('/'); }}>
 					Sign Out
 				</button>
 			{:else}

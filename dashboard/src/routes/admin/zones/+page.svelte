@@ -2,6 +2,8 @@
 	import { onMount } from 'svelte';
 	import { api, type AdminZone, type ZoneCreatePayload } from '$lib/api';
 	import { flash } from '$lib/stores/flash';
+	import { primaryCurrency, secondaryCurrency } from '$lib/stores/currency';
+	import { channelNames, requestResolve, resolveChannel } from '$lib/stores/names';
 	import ConfirmModal from '$lib/components/ConfirmModal.svelte';
 	import EmptyState from '$lib/components/EmptyState.svelte';
 
@@ -14,6 +16,12 @@
 	let formName = $state('');
 	let formDesc = $state('');
 	let formChannels = $state('');
+
+	// Multiplier form state: array of { type, xp, star }
+	interface MultiplierRow { type: string; xp: number; star: number; }
+	let formMultipliers = $state<MultiplierRow[]>([]);
+
+	const INTERACTION_TYPES = ['MESSAGE', 'REACTION_GIVEN', 'REACTION_RECEIVED', 'THREAD_CREATE', 'VOICE_TICK', 'IMAGE', 'FILE', 'LINK'];
 
 	// Confirm deactivation
 	let confirmOpen = $state(false);
@@ -44,6 +52,9 @@
 		try {
 			const res = await api.admin.getZones();
 			zones = res.zones;
+			// Resolve channel IDs to names
+			const allChannelIds = [...new Set(zones.flatMap((z) => z.channel_ids))];
+			if (allChannelIds.length > 0) requestResolve([], allChannelIds);
 		} catch (e) {
 			flash.error('Failed to load zones');
 		} finally {
@@ -57,6 +68,7 @@
 		formName = '';
 		formDesc = '';
 		formChannels = '';
+		formMultipliers = [];
 		showCreate = false;
 		editingId = null;
 	}
@@ -66,7 +78,34 @@
 		formName = z.name;
 		formDesc = z.description || '';
 		formChannels = z.channel_ids.join(', ');
+		// Populate multiplier rows from zone data
+		formMultipliers = Object.entries(z.multipliers).map(([type, mult]) => ({
+			type,
+			xp: mult.xp,
+			star: mult.star,
+		}));
 		showCreate = false;
+	}
+
+	function addMultiplierRow() {
+		// Default to MESSAGE if not already present
+		const usedTypes = new Set(formMultipliers.map((m) => m.type));
+		const nextType = INTERACTION_TYPES.find((t) => !usedTypes.has(t)) || 'MESSAGE';
+		formMultipliers = [...formMultipliers, { type: nextType, xp: 1.0, star: 1.0 }];
+	}
+
+	function removeMultiplierRow(index: number) {
+		formMultipliers = formMultipliers.filter((_, i) => i !== index);
+	}
+
+	/** Build the multipliers payload for the API: { "MESSAGE": [1.5, 1.0], ... } */
+	function buildMultipliersPayload(): Record<string, number[]> | undefined {
+		if (formMultipliers.length === 0) return undefined;
+		const result: Record<string, number[]> = {};
+		for (const m of formMultipliers) {
+			result[m.type] = [m.xp, m.star];
+		}
+		return result;
 	}
 
 	async function handleCreate() {
@@ -83,6 +122,7 @@
 				name: formName.trim(),
 				description: formDesc.trim() || undefined,
 				channel_ids: channelIds.length > 0 ? channelIds : undefined,
+				multipliers: buildMultipliersPayload(),
 			});
 			flash.success(`Zone "${formName}" created`);
 			resetForm();
@@ -106,6 +146,7 @@
 				name: formName.trim() || undefined,
 				description: formDesc.trim() || undefined,
 				channel_ids: channelIds.length > 0 ? channelIds : undefined,
+				multipliers: buildMultipliersPayload(),
 			});
 			flash.success('Zone updated');
 			resetForm();
@@ -156,7 +197,7 @@
 <div class="flex items-center justify-between mb-6">
 	<div>
 		<h1 class="text-2xl font-bold text-white">🗺️ Zones</h1>
-		<p class="text-sm text-zinc-500 mt-1">Channel groupings with custom XP multipliers.</p>
+		<p class="text-sm text-zinc-500 mt-1">Channel groupings with custom {$primaryCurrency} multipliers.</p>
 	</div>
 	<button class="btn-primary" onclick={() => { resetForm(); showCreate = !showCreate; }}>
 		+ New Zone
@@ -181,6 +222,68 @@
 				<input id="zone-desc" class="input" bind:value={formDesc} placeholder="Optional description" />
 			</div>
 		</div>
+
+		<!-- Multiplier Editor -->
+		<div class="mt-4 pt-4 border-t border-surface-300/50">
+			<div class="flex items-center justify-between mb-3">
+				<div>
+					<h4 class="text-sm font-semibold text-zinc-300">Reward Multipliers</h4>
+					<p class="text-xs text-zinc-500">Set per-interaction-type {$primaryCurrency} and {$secondaryCurrency} multipliers for this zone.</p>
+				</div>
+				<button
+					class="btn-secondary text-xs"
+					onclick={addMultiplierRow}
+					disabled={formMultipliers.length >= INTERACTION_TYPES.length}
+				>
+					+ Add Multiplier
+				</button>
+			</div>
+			{#if formMultipliers.length > 0}
+				<div class="space-y-2">
+					<div class="grid grid-cols-[1fr_100px_100px_40px] gap-2 text-[10px] font-semibold text-zinc-500 uppercase tracking-wider px-1">
+						<span>Event Type</span>
+						<span>{$primaryCurrency} ×</span>
+						<span>{$secondaryCurrency} ×</span>
+						<span></span>
+					</div>
+					{#each formMultipliers as row, i}
+						<div class="grid grid-cols-[1fr_100px_100px_40px] gap-2 items-center">
+							<select class="input text-sm" bind:value={row.type}>
+								{#each INTERACTION_TYPES as t}
+									<option value={t} disabled={formMultipliers.some((m, j) => j !== i && m.type === t)}>
+										{t.replace(/_/g, ' ')}
+									</option>
+								{/each}
+							</select>
+							<input
+								type="number"
+								class="input text-sm font-mono text-center"
+								bind:value={row.xp}
+								min="0"
+								max="10"
+								step="0.1"
+							/>
+							<input
+								type="number"
+								class="input text-sm font-mono text-center"
+								bind:value={row.star}
+								min="0"
+								max="10"
+								step="0.1"
+							/>
+							<button
+								class="w-8 h-8 rounded-lg bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors flex items-center justify-center text-sm"
+								onclick={() => removeMultiplierRow(i)}
+								title="Remove"
+							>×</button>
+						</div>
+					{/each}
+				</div>
+			{:else}
+				<p class="text-xs text-zinc-600 italic">No multipliers set — zone will use global defaults (1.0×).</p>
+			{/if}
+		</div>
+
 		<div class="flex gap-2 mt-4">
 			{#if editingId}
 				<button class="btn-primary" onclick={handleUpdate}>Save Changes</button>
@@ -200,7 +303,7 @@
 	<EmptyState
 		icon="🗺️"
 		title="No zones configured"
-		description="Zones group Discord channels with custom XP multipliers. Create your first zone to start shaping the reward landscape."
+		description="Zones group Discord channels with custom {$primaryCurrency} multipliers. Create your first zone to start shaping the reward landscape."
 		action={{ label: '+ Create Zone', onclick: () => { resetForm(); showCreate = true; } }}
 	/>
 {:else}
@@ -239,7 +342,7 @@
 										<svg class="w-3 h-3 text-zinc-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
 											<path stroke-linecap="round" stroke-linejoin="round" d="M7 20l4-16m2 16l4-16M6 9h14M4 15h14" />
 										</svg>
-										{fmtChannelId(ch)}
+										{resolveChannel(ch, $channelNames)}
 									</span>
 								{/each}
 							</div>
@@ -254,7 +357,7 @@
 									<div class="flex items-center gap-1.5 text-[11px] px-2 py-1 rounded-md bg-brand-500/10 border border-brand-500/20">
 										<span class="text-brand-400 font-semibold">{type}</span>
 										<span class="text-zinc-500">·</span>
-										<span class="text-brand-300 font-mono">{mult.xp}× XP</span>
+										<span class="text-brand-300 font-mono">{mult.xp}× {$primaryCurrency}</span>
 										{#if mult.star > 0}
 											<span class="text-gold-400 font-mono">{mult.star}× ★</span>
 										{/if}

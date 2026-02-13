@@ -21,7 +21,7 @@
 		if (token) {
 			auth.login(token);
 			flash.success('Signed in as admin');
-			goto('/admin/zones');
+			goto('/admin/setup');
 		} else if (code && state) {
 			const callbackUrl = `/api/auth/callback?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}`;
 			window.location.assign(callbackUrl);

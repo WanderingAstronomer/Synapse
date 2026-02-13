@@ -2,11 +2,12 @@
 	import { onMount } from 'svelte';
 	import { api, type AdminUser, type Achievement } from '$lib/api';
 	import { flash } from '$lib/stores/flash';
+	import { primaryCurrency, secondaryCurrency } from '$lib/stores/currency';
 	import Avatar from '$lib/components/Avatar.svelte';
 	import { fmt } from '$lib/utils';
 
 	// Tabs
-	let tab = $state<'xp-gold' | 'achievement'>('xp-gold');
+	let tab = $state<'currency' | 'achievement'>('currency');
 
 	// User search
 	let searchQuery = $state('');
@@ -14,7 +15,7 @@
 	let selectedUser = $state<AdminUser | null>(null);
 	let searchTimeout: ReturnType<typeof setTimeout>;
 
-	// XP/Gold form
+	// Currency form
 	let xpAmount = $state(0);
 	let goldAmount = $state(0);
 	let reason = $state('');
@@ -49,7 +50,7 @@
 
 	async function awardXpGold() {
 		if (!selectedUser) { flash.warning('Select a user first'); return; }
-		if (xpAmount === 0 && goldAmount === 0) { flash.warning('Enter XP or Gold amount'); return; }
+		if (xpAmount === 0 && goldAmount === 0) { flash.warning(`Enter ${$primaryCurrency} or ${$secondaryCurrency} amount`); return; }
 		try {
 			const res = await api.admin.awardXpGold({
 				user_id: parseInt(selectedUser.id),
@@ -58,7 +59,7 @@
 				gold: goldAmount,
 				reason: reason.trim(),
 			});
-			flash.success(`Awarded ${xpAmount} XP + ${goldAmount} Gold → now ${fmt(res.xp)} XP, Lvl ${res.level}`);
+			flash.success(`Awarded ${xpAmount} ${$primaryCurrency} + ${goldAmount} ${$secondaryCurrency} → now ${fmt(res.xp)} ${$primaryCurrency}, Lvl ${res.level}`);
 			xpAmount = 0;
 			goldAmount = 0;
 			reason = '';
@@ -84,17 +85,17 @@
 
 <div class="mb-6">
 	<h1 class="text-2xl font-bold text-white">🎁 Manual Awards</h1>
-	<p class="text-sm text-zinc-500 mt-1">Grant XP, Gold, or achievements to specific members.</p>
+	<p class="text-sm text-zinc-500 mt-1">Grant {$primaryCurrency}, {$secondaryCurrency}, or achievements to specific members.</p>
 </div>
 
 <!-- Tabs -->
 <div class="flex gap-2 mb-6">
 	<button
 		class="px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 hover:scale-[1.03] active:scale-[0.97]
-			{tab === 'xp-gold' ? 'bg-brand-600 text-white shadow-md shadow-brand-600/30' : 'bg-surface-200 text-zinc-400 hover:text-zinc-200'}"
-		onclick={() => (tab = 'xp-gold')}
+			{tab === 'currency' ? 'bg-brand-600 text-white shadow-md shadow-brand-600/30' : 'bg-surface-200 text-zinc-400 hover:text-zinc-200'}"
+		onclick={() => (tab = 'currency')}
 	>
-		✨ XP & Gold
+		✨ {$primaryCurrency} & {$secondaryCurrency}
 	</button>
 	<button
 		class="px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 hover:scale-[1.03] active:scale-[0.97]
@@ -142,16 +143,16 @@
 	{/if}
 </div>
 
-{#if tab === 'xp-gold'}
+{#if tab === 'currency'}
 	<div class="card animate-fade-in">
-		<h3 class="text-sm font-semibold text-zinc-300 mb-4">Award XP & Gold</h3>
+		<h3 class="text-sm font-semibold text-zinc-300 mb-4">Award {$primaryCurrency} & {$secondaryCurrency}</h3>
 		<div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
 			<div>
-				<label class="label" for="award-xp">XP Amount</label>
+				<label class="label" for="award-xp">{$primaryCurrency} Amount</label>
 				<input id="award-xp" class="input" type="number" bind:value={xpAmount} placeholder="0" />
 			</div>
 			<div>
-				<label class="label" for="award-gold">Gold Amount</label>
+				<label class="label" for="award-gold">{$secondaryCurrency} Amount</label>
 				<input id="award-gold" class="input" type="number" bind:value={goldAmount} placeholder="0" />
 			</div>
 			<div>

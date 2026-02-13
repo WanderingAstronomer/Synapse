@@ -33,13 +33,32 @@ class PeriodicTasks(commands.Cog):
 
     async def cog_load(self) -> None:
         """Start task loops when the cog is loaded."""
+        self.heartbeat_loop.start()
         self.retention_loop.start()
         self.reconciliation_loop.start()
 
     async def cog_unload(self) -> None:
         """Cancel task loops on unload."""
+        self.heartbeat_loop.cancel()
         self.retention_loop.cancel()
         self.reconciliation_loop.cancel()
+
+    # -------------------------------------------------------------------
+    # Bot heartbeat — writes a timestamp every 30 seconds
+    # -------------------------------------------------------------------
+    @tasks.loop(seconds=30)
+    async def heartbeat_loop(self):
+        """Write a heartbeat timestamp so the dashboard can confirm bot is alive."""
+        from synapse.services.setup_service import save_bot_heartbeat
+
+        try:
+            await run_db(save_bot_heartbeat, self.bot.engine)
+        except Exception:
+            logger.exception("Heartbeat write failed")
+
+    @heartbeat_loop.before_loop
+    async def _wait_heartbeat(self):
+        await self.bot.wait_until_ready()
 
     # -------------------------------------------------------------------
     # Retention cleanup — runs every 24 hours

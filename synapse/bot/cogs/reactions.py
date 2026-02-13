@@ -48,6 +48,10 @@ class Reactions(commands.Cog, name="Reactions"):
     @commands.Cog.listener()
     async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent) -> None:
         """Fire when any reaction is added, even on uncached messages."""
+        logger.info(
+            "Gateway event: REACTION_ADD from user %s on message %s in channel %s",
+            payload.user_id, payload.message_id, payload.channel_id,
+        )
         try:
             await self._handle_reaction(payload)
         except Exception:

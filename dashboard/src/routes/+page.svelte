@@ -8,6 +8,7 @@
 	import RarityBadge from '$lib/components/RarityBadge.svelte';
 	import EmptyState from '$lib/components/EmptyState.svelte';
 	import SynapseLoader from '$lib/components/SynapseLoader.svelte';
+	import { primaryCurrency, secondaryCurrency } from '$lib/stores/currency';
 	import { fmt, timeAgo, eventTypeLabel } from '$lib/utils';
 
 	let metrics = $state<Metrics | null>(null);
@@ -61,7 +62,7 @@
 		{emoji}
 		metrics={metrics ? [
 			{ label: 'Members', value: metrics.total_users, icon: '👥' },
-			{ label: 'Total XP', value: metrics.total_xp, icon: '✨' },
+			{ label: `Total ${$primaryCurrency}`, value: metrics.total_xp, icon: '✨' },
 			{ label: 'Active (7d)', value: metrics.active_users_7d, icon: '🔥' },
 			{ label: 'Top Level', value: metrics.top_level, icon: '🏆' },
 		] : []}
@@ -84,7 +85,7 @@
 									{eventTypeLabel(evt.event_type).toLowerCase()}
 								{/if}
 								{#if evt.xp_delta > 0}
-									<span class="text-brand-400 font-medium">+{evt.xp_delta} XP</span>
+									<span class="text-brand-400 font-medium">+{evt.xp_delta} {$primaryCurrency}</span>
 								{/if}
 								<span class="text-zinc-600 mx-1">·</span>
 								<span class="text-zinc-600">{timeAgo(evt.timestamp)}</span>
@@ -96,7 +97,7 @@
 		</div>
 	{/if}
 
-	<div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+	<div class="grid grid-cols-1 lg:grid-cols-3 gap-6 min-w-0">
 		<!-- Top Members (2 cols) -->
 		<div class="lg:col-span-2 card">
 			<div class="flex items-center justify-between mb-4">
@@ -130,7 +131,7 @@
 									<span class="badge bg-amber-500/15 text-amber-400 border border-amber-500/30 text-[10px]">Champion</span>
 								</div>
 								<div class="flex items-center gap-3 mt-1 text-xs">
-									<span class="text-brand-400 font-bold">{fmt(champion.xp)} XP</span>
+									<span class="text-brand-400 font-bold">{fmt(champion.xp)} {$primaryCurrency}</span>
 									<span class="text-zinc-500">Level {champion.level}</span>
 									{#if champion.gold > 0}
 										<span class="text-gold-400">🪙 {fmt(champion.gold)}</span>
@@ -165,7 +166,7 @@
 								</div>
 							</div>
 							<div class="text-right">
-								<p class="text-sm font-bold text-brand-400">{fmt(user.xp)} XP</p>
+								<p class="text-sm font-bold text-brand-400">{fmt(user.xp)} {$primaryCurrency}</p>
 								{#if user.gold > 0}
 									<p class="text-xs text-gold-400">🪙 {fmt(user.gold)}</p>
 								{/if}

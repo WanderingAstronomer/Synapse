@@ -1,137 +1,131 @@
 # Changelog
 
-All notable changes to Project Synapse will be documented in this file.
+All notable changes to Synapse are documented here.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [Unreleased]
 
-## [1.0.0] - 2026-02-12
+### Security & Reliability
 
-### 🎉 Initial Release
+- **JWT secret hardening** — Removed hardcoded fallback secret. API startup now validates: minimum 32 characters, rejects known-weak values (`change-me`, `secret`, etc.), and refuses to start with missing or blank secrets.
+- **Admin mutation rate limiting** — Sliding-window throttle: 30 mutations/minute per admin. Returns `429` with `Retry-After` and `X-RateLimit-*` response headers. Only counts successful mutations.
+- **NOTIFY SQL injection prevention** — `send_notify()` validates table names against a frozen allowlist before constructing the SQL string.
+- **PG LISTEN/NOTIFY reconnect** — Infinite reconnect loop with exponential backoff (1s–60s) and random jitter. Listener health exposed via `ConfigCache.listener_healthy` property.
+- **Replaced python-jose with PyJWT** — Switched JWT library to `PyJWT[crypto]` for a smaller dependency footprint.
+- **Removed unused requests dependency** — Only `httpx` is used for HTTP calls.
 
-Project Synapse 1.0 is a production-ready gamified engagement framework for Discord communities, transforming Discord activity into meaningful recognition through XP, Stars, Gold, achievements, and seasonal progression.
+### Seedless Bootstrap
 
-### Added
+- Deleted `synapse/services/seed.py` and `seeds/` directory. The bot no longer seeds data on startup.
+- Added `setup_service.py` — First-run bootstrap reads the live Discord guild structure (categories, channels) and creates zones, channel mappings, a default season, and 18 default settings.
+- Guild snapshot written to the `settings` table on every bot connect for API access to channel metadata.
+- Setup API endpoints: `GET /api/admin/setup/status` and `POST /api/admin/setup/bootstrap`.
+- Dashboard setup wizard at `/admin/setup` — admin layout auto-redirects here if the guild hasn't been bootstrapped.
+- Bot heartbeat (`save_bot_heartbeat` / `get_bot_heartbeat`) for dashboard online status display.
 
-#### Core Systems
-- **Economy**: XP for progression, Stars for social recognition, Gold for rewards
-- **Zone-Based Multipliers**: Per-channel grouping with customizable XP and Star multipliers for each event type
-- **Intelligent Reward Engine**: Quality-weighted message XP based on length, code blocks, links, and attachments
-- **Seasonal Stats**: Separate lifetime and seasonal tracking with automatic season rollover
-- **Achievement System**: 4 trigger types (counter_threshold, star_threshold, xp_milestone, custom) with 11 seed achievements
+### Dashboard
 
-#### Bot Features (discord.py)
-- **Social Activity Tracking**: Message XP with quality modifiers, reply bonuses, and thread participation
-- **Reaction System**: Star rewards with unique-reactor weighting and diminishing returns
-- **Voice Channel XP**: Activity-based rewards with anti-idle detection
-- **Thread Creation Tracking**: Rewards for initiating discussions
-- **User Commands**:
-  - `/profile [member]` — View XP, level, gold, stars, achievements, and rank
-  - `/leaderboard [xp|stars]` — Top members by XP or Stars
-  - `/link-github <username>` — Associate GitHub account (ready for GitHub Neural Bridge)
-  - `/preferences <setting> <on|off>` — Toggle announcement preferences
-  - `/buy-coffee` — Gold sink demonstration
-- **Admin Commands**:
-  - `/award <member> [xp] [gold] [reason]` — Manual XP/Gold awards
-  - `/create-achievement` — Define new achievement templates
-  - `/grant-achievement <member> <id>` — Grant achievements manually
-  - `/season <name> [days]` — Create new seasons
+- Admin layout auth guard with setup-gate redirect.
+- API proxy (`/api/[...path]` → FastAPI backend) for CORS-free production deployment.
+- Bot and API health indicators in the sidebar (polled every 30s).
+- Name resolution store (`names.ts`) with 50ms batched snowflake ID → name lookups.
+- Version mismatch handling — forces full page reload when SvelteKit detects stale JS chunks after a rebuild.
 
-#### Anti-Gaming Measures
-- Self-reaction filtering
-- Unique-reactor weighting for Star awards
-- Per-user per-target reaction caps
-- Diminishing returns on repeated interactions
-- Reaction velocity limits
-- Message quality thresholds
+### Testing
 
-#### API (FastAPI)
-- **Public Endpoints**:
-  - Live metrics (total members, XP, active users, top level)
-  - Paginated leaderboards (XP, Gold, Level)
-  - Daily activity charts with event-type breakdown
-  - Achievement browsing with rarity and category filters
-  - User profile lookup by Discord ID
-- **Admin Endpoints** (JWT-protected):
-  - Zone CRUD with channel mapping and multiplier management
-  - Achievement builder with full field editing
-  - Award distribution (XP, Gold, achievements)
-  - Settings management with category filtering
-  - Audit log with before/after JSON snapshots
-- **Authentication**: Discord OAuth2 → JWT issuance with admin role verification
-- **Rate Limiting**: 30 mutations/minute per admin session
-
-#### Dashboard (SvelteKit + Tailwind + Chart.js)
-- **Community Dashboard (Public)**:
-  - Hero banner with live metrics and animated counters
-  - Multi-tab leaderboard (XP, Gold, Level) with Discord avatars and progress bars
-  - Interactive Chart.js stacked bar chart showing daily event breakdown
-  - Filterable event feed with event-type color coding
-  - Achievement showcase with rarity glow effects and category/rarity filters
-  - Recent achievers display with Discord avatar integration
-- **Admin Panel** (OAuth-gated):
-  - Zone editor with drag-and-drop channel assignment
-  - Achievement builder with live preview
-  - Bulk award distribution with user search
-  - Inline settings editor with bulk save
-  - Expandable audit log with JSON diff viewer
-  - Real-time validation and error handling
-  - Flash notification system
-- **Full Responsive Design**: Mobile-optimized with Tailwind CSS
-- **Discord CDN Integration**: Automatic avatar URL construction with fallback handling
-
-#### Database (PostgreSQL 16)
-- **12 Tables**: Users, Events, SeasonalStats, Achievements, UserAchievements, Zones, ZoneChannels, ZoneMultipliers, Seasons, Settings, AuditLog, Quests
-- **Advanced Features**:
-  - JSONB columns for flexible event metadata and audit snapshots
-  - Partial indexes for performance optimization
-  - PG LISTEN/NOTIFY for cache invalidation (no Redis needed)
-  - Composite indexes for efficient leaderboard queries
-  - Idempotent event insertion (ON CONFLICT DO NOTHING)
-
-#### Configuration & Infrastructure
-- YAML-based configuration (`config.yaml`) for community-specific settings
-- Environment variable support (`.env` with `.env.example` template)
-- Docker Compose orchestration (4 services: db, bot, api, dashboard)
-- Seed data system for achievements, settings, and zones
-- Comprehensive test suite with pytest
-- Multi-stage Docker builds for production optimization
-
-#### Developer Experience
-- Type-safe API client in TypeScript
-- SQLAlchemy 2.0 with Mapped[] annotations
-- uv for fast Python dependency management
-- Hot-reload support for both bot and API
-- VS Code task definitions for common operations
-- Structured logging throughout the stack
-
-### Technical Highlights
-- **Idempotent Event Processing**: Guarantees exactly-once reward application
-- **Cache Invalidation**: Real-time configuration updates via PostgreSQL LISTEN/NOTIFY
-- **Quality Modifiers**: Content-aware XP calculations for messages
-- **Audit Trail**: Complete mutation history with before/after state snapshots
-- **OAuth Security**: Discord-verified admin access with JWT session management
-- **Performance**: Optimized queries with partial indexes and connection pooling
-
-### Architecture
-- **4-Service Stack**: PostgreSQL 16, Discord bot (discord.py), FastAPI REST API, SvelteKit dashboard
-- **Event Pipeline**: Discord Event → SynapseEvent → Zone Classification → Quality Modifier → Anti-Gaming → Multiplier Application → XP Cap → Idempotent Persist → Stat Update → Achievement Check → Level-Up Check
-- **Async-Ready**: SQLAlchemy engine with asyncio.to_thread for Discord bot integration
+- Expanded test suite to 12 files (~3,200 lines).
+- JWT startup validation tests (missing, blank, short, weak secrets).
+- Admin rate limit tests (sliding window, 429 responses, header validation).
+- NOTIFY table-name allowlist tests.
+- Cache listener health and reconnect tests.
+- FastAPI route auth guard integration tests.
+- In-memory SQLite fixtures with JSONB→TEXT dialect shim.
 
 ### Documentation
-- Comprehensive README with architecture diagrams, setup instructions, and API overview
-- Design documents covering vision, architecture, configurable economy, database schema, reward engine, achievements, admin panel, and deployment
-- Implementation decisions and requirements trace documents
-- Seed data templates for achievements, settings, and zones
 
-### Deferred to Future Releases
-- GitHub Neural Bridge (webhook integration for code contribution XP)
-- LLM-based content quality modifiers (stub present, ready for integration)
-- Quest system (database tables exist, UI deferred)
-- Alembic database migrations (using `create_all` for initial release)
-- Custom achievement badge images (column exists, rendering deferred)
-- DM notification delivery (preference storage implemented, delivery deferred)
+- Rebuilt all documentation from scratch based on the current state of the codebase.
 
----
+## [1.0.0] — 2026-02-12
 
-**Full Changelog**: https://github.com/yourusername/synapse/commits/v1.0.0
+Initial release.
+
+### Core Systems
+
+- Three-currency economy: XP (progression/leveling), Stars (seasonal recognition), Gold (spendable).
+- Zone-based channel groupings with per-event-type XP and Star multipliers.
+- Quality-weighted reward engine: message length, code blocks, links, attachments, emoji spam penalty.
+- Anti-gaming: self-reaction filter, per-reactor-per-author pair cap (3/day), diminishing returns, unique-reactor weighting, velocity cap, message cooldown.
+- Exponential leveling formula: `level_base × level_factor^level` (defaults 100, 1.25). Gold bonus on level-up.
+- Achievement system with four trigger types: `counter_threshold`, `star_threshold`, `xp_milestone`, `custom`. Five rarity tiers.
+- Seasonal stats tracking (per-user per-season counters for messages, reactions, threads, voice).
+
+### Event Lake
+
+- Append-only capture of 9 Discord gateway event types: message_create, reaction_add, reaction_remove, thread_create, voice_join, voice_leave, voice_move, member_join, member_leave.
+- Idempotent inserts with source_id deduplication.
+- Pre-computed event counters by (user, type, zone, period) for O(1) reads.
+- Per-source toggles via admin dashboard.
+- Privacy-safe: message content never persisted, only metadata.
+- Retention cleanup (daily, default 90 days, batch 5,000).
+- Counter reconciliation (weekly, validates lifetime counters vs raw events).
+- Backfill utility for migrating legacy activity_log data to event counters.
+- Voice session tracking with AFK channel detection.
+
+### Bot
+
+- 8 cogs: Social, Reactions, Voice, Threads, Membership, Meta, Admin, PeriodicTasks.
+- 5 user commands: `/profile`, `/leaderboard`, `/link-github`, `/preferences`, `/buy-coffee`.
+- 4 admin commands: `/award`, `/create-achievement`, `/grant-achievement`, `/season`.
+- Event listeners: `on_message`, `on_raw_reaction_add`, `on_raw_reaction_remove`, `on_voice_state_update`, `on_thread_create`, `on_member_join`, `on_member_remove`.
+- Background tasks: heartbeat (30s), voice tick (10min), retention (24h), reconciliation (7d).
+- Announcement service with per-user preference gating, per-channel throttling (3/min), and async drain queue.
+- Auto-creates `#synapse-achievements` channel on startup.
+- Auto-discovers guild channels and maps to zones by category name.
+- In-memory `ConfigCache` with PG LISTEN/NOTIFY for near-instant invalidation.
+
+### API (FastAPI)
+
+- 8 public endpoints: health, bot heartbeat, metrics, leaderboard, activity, achievements, recent achievements, public settings.
+- 3 auth endpoints: OAuth2 login redirect, callback (code exchange + admin role check + JWT issuance), current admin info.
+- 17 admin endpoints: zone CRUD, achievement CRUD, manual awards, user search, settings CRUD, audit log, setup/bootstrap, live logs, name resolution.
+- 9 Event Lake admin endpoints: event browser, data source toggles, health metrics, storage estimate, retention/reconciliation/backfill triggers, counter browser.
+- Discord OAuth2 → JWT (HS256, 12h expiry) authentication.
+- Admin rate limiting middleware (30 mutations/minute per admin).
+- CORS middleware for development origins.
+- In-memory ring buffer log handler for live log streaming.
+
+### Dashboard (SvelteKit)
+
+- 4 public pages: overview (hero metrics, activity ticker, champion spotlight), leaderboard, activity feed with charts, achievement gallery.
+- 8 admin pages: setup wizard, zones, achievements, awards, settings, audit log, live logs, data source toggles.
+- Client-side SPA (SSR disabled) with Svelte 5, TypeScript, Tailwind CSS.
+- 10 reusable components: Avatar, ConfirmModal, EmptyState, FlashMessage, HeroHeader, MetricCard, ProgressBar, RarityBadge, Sidebar, SynapseLoader.
+- 4 stores: auth (JWT state), currency (configurable labels), flash (toasts), names (batched ID resolution).
+- Chart.js integration for activity visualization.
+
+### Database (PostgreSQL 16)
+
+- 15 tables: users, user_stats, seasons, activity_log, zones, zone_channels, zone_multipliers, achievement_templates, user_achievements, quests, admin_log, user_preferences, settings, event_lake, event_counters.
+- JSONB columns for flexible metadata and configuration.
+- Partial unique indexes for idempotent event insertion.
+- PG LISTEN/NOTIFY for cache invalidation.
+- Composite indexes for query performance.
+- Async bridge pattern: `run_db()` ships sync SQLAlchemy calls to thread pool.
+
+### Infrastructure
+
+- Docker Compose with 4 services (db, bot, api, dashboard) on shared network.
+- Multi-stage Dockerfile: builder (uv + dependency install) → runtime (minimal Python 3.12-slim).
+- Healthchecks on all services.
+- uv package manager for Python dependencies.
+- Alembic for database migrations.
+- pytest test suite with in-memory SQLite.
+- Ruff for linting and formatting, mypy for type checking.
+
+### Deferred
+
+- Quest system UI (schema exists, no dashboard/command interface).
+- GitHub Neural Bridge integration.
+- LLM quality modifier (`llm_quality_modifier()` returns 1.0 — placeholder).
+- Custom badge image uploads.
+- DM notification delivery.
+- Redis session store for multi-instance OAuth state.

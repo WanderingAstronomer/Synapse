@@ -3,6 +3,12 @@
 @tailwind utilities;
 
 @layer base {
+	:root {
+		/* Global scale factor — adjust this single value to resize the entire UI */
+		--ui-scale: 1.25;
+		font-size: calc(16px * var(--ui-scale));
+	}
+
 	body {
 		@apply bg-surface-0 text-zinc-100;
 	}

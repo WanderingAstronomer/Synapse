@@ -21,10 +21,17 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 		headers['Authorization'] = `Bearer ${token}`;
 	}
 
-	const res = await fetch(`${BASE}${path}`, { ...options, headers });
+	let res: Response;
+	try {
+		res = await fetch(`${BASE}${path}`, { ...options, headers });
+	} catch (err) {
+		console.error(`[api] Network error: ${options.method || 'GET'} ${path}`, err);
+		throw new ApiError(0, `Network error: ${(err as Error).message}`);
+	}
 
 	if (!res.ok) {
 		const body = await res.json().catch(() => ({ detail: res.statusText }));
+		console.error(`[api] HTTP ${res.status}: ${options.method || 'GET'} ${path}`, body);
 		throw new ApiError(res.status, body.detail || res.statusText);
 	}
 
@@ -205,6 +212,33 @@ export const api = {
 			if (params.page_size) p.set('page_size', String(params.page_size));
 			return request<CounterListResponse>(`/admin/event-lake/counters?${p.toString()}`);
 		},
+
+		// Setup / Bootstrap
+		getSetupStatus: () =>
+			request<SetupStatus>('/admin/setup/status'),
+		runBootstrap: () =>
+			request<BootstrapResult>('/admin/setup/bootstrap', { method: 'POST' }),
+
+		// Live Logs
+		getLogs: (params: { tail?: number; level?: string; logger?: string } = {}) => {
+			const p = new URLSearchParams();
+			if (params.tail) p.set('tail', String(params.tail));
+			if (params.level) p.set('level', params.level);
+			if (params.logger) p.set('logger', params.logger);
+			return request<LogsResponse>(`/admin/logs?${p.toString()}`);
+		},
+		setLogLevel: (level: string) =>
+			request<{ level: string }>('/admin/logs/level', {
+				method: 'PUT',
+				body: JSON.stringify({ level }),
+			}),
+
+		// Name resolution (user/channel IDs → display names)
+		resolveNames: (userIds: string[] = [], channelIds: string[] = []) =>
+			request<{ users: Record<string, string>; channels: Record<string, string> }>(
+				'/admin/resolve-names',
+				{ method: 'POST', body: JSON.stringify({ user_ids: userIds, channel_ids: channelIds }) }
+			),
 	},
 };
 
@@ -444,4 +478,51 @@ export interface CounterListResponse {
 	page: number;
 	page_size: number;
 	counters: CounterRow[];
+}
+
+// ---------------------------------------------------------------------------
+// Setup / Bootstrap types
+// ---------------------------------------------------------------------------
+export interface GuildSnapshotInfo {
+	guild_id: string;
+	guild_name: string;
+	channel_count: number;
+	captured_at: string;
+}
+
+export interface SetupStatus {
+	initialized: boolean;
+	bootstrap_version: number | null;
+	bootstrap_timestamp: string | null;
+	has_guild_snapshot: boolean;
+	guild_snapshot: GuildSnapshotInfo | null;
+	has_zones: boolean;
+}
+
+export interface BootstrapResult {
+	success: boolean;
+	zones_created: number;
+	zones_existing: number;
+	channels_mapped: number;
+	channels_existing: number;
+	season_created: boolean;
+	settings_written: number;
+	warnings: string[];
+}
+
+// ---------------------------------------------------------------------------
+// Live Logs types
+// ---------------------------------------------------------------------------
+export interface LogEntry {
+	timestamp: string;
+	level: string;
+	logger: string;
+	message: string;
+}
+
+export interface LogsResponse {
+	entries: LogEntry[];
+	total: number;
+	capture_level: string;
+	valid_levels: string[];
 }

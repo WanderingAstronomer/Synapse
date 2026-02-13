@@ -44,6 +44,12 @@ class Threads(commands.Cog, name="Threads"):
     @commands.Cog.listener()
     async def on_thread_create(self, thread: discord.Thread) -> None:
         """Award XP/Stars for creating a new thread."""
+        logger.info(
+            "Gateway event: THREAD_CREATE '%s' by %s in guild %s",
+            thread.name,
+            getattr(thread.owner, "name", "unknown"),
+            getattr(thread.guild, "name", "unknown"),
+        )
         try:
             await self._handle_thread_create(thread)
         except Exception:

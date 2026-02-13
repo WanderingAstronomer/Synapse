@@ -95,6 +95,13 @@ class Social(commands.Cog, name="Social"):
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message) -> None:
         """Core XP/Star loop — fires on every guild message."""
+        logger.info(
+            "Gateway event: MESSAGE from %s in #%s (bot=%s, guild=%s)",
+            message.author.name,
+            getattr(message.channel, "name", "DM"),
+            message.author.bot,
+            message.guild.name if message.guild else "None",
+        )
         try:
             await self._handle_message(message)
         except Exception:

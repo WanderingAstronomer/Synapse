@@ -5,6 +5,7 @@
 	import ProgressBar from '$lib/components/ProgressBar.svelte';
 	import EmptyState from '$lib/components/EmptyState.svelte';
 	import SynapseLoader from '$lib/components/SynapseLoader.svelte';
+	import { primaryCurrency, secondaryCurrency } from '$lib/stores/currency';
 	import { fmt } from '$lib/utils';
 
 	type Currency = 'xp' | 'gold' | 'level';
@@ -18,11 +19,11 @@
 
 	const RANK_MEDALS = ['🥇', '🥈', '🥉'];
 
-	const tabs: { value: Currency; label: string; icon: string }[] = [
-		{ value: 'xp', label: 'XP', icon: '✨' },
-		{ value: 'gold', label: 'Gold', icon: '🪙' },
-		{ value: 'level', label: 'Level', icon: '📊' },
-	];
+	const tabs = $derived([
+		{ value: 'xp' as Currency, label: $primaryCurrency, icon: '✨' },
+		{ value: 'gold' as Currency, label: $secondaryCurrency, icon: '🪙' },
+		{ value: 'level' as Currency, label: 'Level', icon: '📊' },
+	]);
 
 	async function load() {
 		loading = true;
@@ -64,7 +65,7 @@
 	function valueFor(user: LeaderboardUser): string {
 		if (currency === 'gold') return `🪙 ${fmt(user.gold)}`;
 		if (currency === 'level') return `Lvl ${user.level}`;
-		return `${fmt(user.xp)} XP`;
+		return `${fmt(user.xp)} ${$primaryCurrency}`;
 	}
 
 	const champion = $derived(users.length > 0 && page === 1 ? users[0] : null);
@@ -101,7 +102,7 @@
 	<EmptyState
 		icon="🏆"
 		title="Leaderboard is empty"
-		description="No members have earned XP yet. Invite Synapse to your server to start tracking engagement!"
+		description="No members have earned {$primaryCurrency} yet. Invite Synapse to your server to start tracking engagement!"
 		variant="hero"
 	/>
 {:else}
@@ -123,7 +124,7 @@
 						<span class="badge bg-amber-500/15 text-amber-400 border border-amber-500/30">🥇 Champion</span>
 					</div>
 					<div class="flex items-center gap-4 text-sm mb-3">
-						<span class="text-brand-400 font-bold">{fmt(champion.xp)} XP</span>
+						<span class="text-brand-400 font-bold">{fmt(champion.xp)} {$primaryCurrency}</span>
 						<span class="text-zinc-500">Level {champion.level}</span>
 						{#if champion.gold > 0}
 							<span class="text-gold-400">🪙 {fmt(champion.gold)}</span>
@@ -153,7 +154,7 @@
 					<th class="px-4 py-3 text-left w-12">#</th>
 					<th class="px-4 py-3 text-left">Member</th>
 					<th class="px-4 py-3 text-left w-48">Progress to Next Level</th>
-					<th class="px-4 py-3 text-right">{currency === 'gold' ? 'Gold' : currency === 'level' ? 'Level' : 'XP'}</th>
+					<th class="px-4 py-3 text-right">{currency === 'gold' ? $secondaryCurrency : currency === 'level' ? 'Level' : $primaryCurrency}</th>
 				</tr>
 			</thead>
 			<tbody>

@@ -36,6 +36,16 @@ logger = logging.getLogger(__name__)
 # The PG channel name used for config invalidation
 NOTIFY_CHANNEL = "config_changed"
 
+# Allowlist of table names accepted by send_notify() (F-005).
+# Any call with a table_name not in this set will raise ValueError.
+ALLOWED_NOTIFY_TABLES: frozenset[str] = frozenset({
+    "zones",
+    "zone_channels",
+    "zone_multipliers",
+    "achievement_templates",
+    "settings",
+})
+
 
 class ConfigCache:
     """Thread-safe in-memory cache for zone/multiplier/achievement/setting config.
@@ -70,6 +80,7 @@ class ConfigCache:
         self._settings: dict[str, Any] = {}
 
         self._listener_task: asyncio.Task | None = None
+        self._listener_healthy: bool = False
 
     # -------------------------------------------------------------------
     # Cache loading (synchronous — called via run_db or directly)
@@ -233,13 +244,25 @@ class ConfigCache:
         else:
             logger.warning("Unknown table in NOTIFY: %s — ignoring", table_name)
 
+    @property
+    def listener_healthy(self) -> bool:
+        """Return True if the LISTEN thread is alive and connected."""
+        return self._listener_healthy
+
     def start_listener(self, loop: asyncio.AbstractEventLoop | None = None) -> None:
         """Start a background thread that LISTENs on the PG channel.
 
         The thread uses raw psycopg2 connection + select() to avoid
-        blocking the asyncio event loop.
+        blocking the asyncio event loop.  Includes automatic reconnection
+        with exponential backoff + jitter if the connection drops (F-006).
         """
+        import random
+
         import psycopg2
+
+        # Maximum backoff: 60 seconds
+        max_backoff = 60.0
+        base_backoff = 1.0
 
         def _listen_thread() -> None:
             # NOTE: str(engine.url) hides the password by default (***).
@@ -247,27 +270,53 @@ class ConfigCache:
             raw_url = self._engine.url.render_as_string(hide_password=False)
             # Convert SQLAlchemy URL to psycopg2 DSN
             dsn = raw_url.replace("postgresql+psycopg2://", "postgresql://")
-            try:
-                conn = psycopg2.connect(dsn)
-                conn.set_isolation_level(0)  # autocommit
-                cur = conn.cursor()
-                cur.execute(f"LISTEN {NOTIFY_CHANNEL};")
-                logger.info("PG LISTEN started on channel '%s'", NOTIFY_CHANNEL)
+            attempt = 0
 
-                while True:
-                    if _select.select([conn], [], [], 5.0) == ([], [], []):
-                        continue
-                    conn.poll()
-                    while conn.notifies:
-                        notify = conn.notifies.pop(0)
-                        payload = notify.payload or ""
-                        logger.debug("NOTIFY received: %s", payload)
+            while True:
+                conn = None
+                try:
+                    conn = psycopg2.connect(dsn)
+                    conn.set_isolation_level(0)  # autocommit
+                    cur = conn.cursor()
+                    cur.execute(f"LISTEN {NOTIFY_CHANNEL};")
+                    logger.info("PG LISTEN started on channel '%s'", NOTIFY_CHANNEL)
+
+                    # Reset backoff on successful connection
+                    attempt = 0
+                    self._listener_healthy = True
+
+                    while True:
+                        if _select.select([conn], [], [], 5.0) == ([], [], []):
+                            continue
+                        conn.poll()
+                        while conn.notifies:
+                            notify = conn.notifies.pop(0)
+                            payload = notify.payload or ""
+                            logger.debug("NOTIFY received: %s", payload)
+                            try:
+                                self.handle_notify(payload)
+                            except Exception:
+                                logger.exception("Error handling NOTIFY payload: %s", payload)
+
+                except Exception:
+                    self._listener_healthy = False
+                    attempt += 1
+                    backoff = min(base_backoff * (2 ** (attempt - 1)), max_backoff)
+                    jitter = random.uniform(0, backoff * 0.5)
+                    wait = backoff + jitter
+                    logger.exception(
+                        "PG LISTEN connection lost (attempt %d). "
+                        "Reconnecting in %.1fs…",
+                        attempt, wait,
+                    )
+                    import time
+                    time.sleep(wait)
+                finally:
+                    if conn is not None:
                         try:
-                            self.handle_notify(payload)
+                            conn.close()
                         except Exception:
-                            logger.exception("Error handling NOTIFY payload: %s", payload)
-            except Exception:
-                logger.exception("PG LISTEN thread crashed")
+                            pass
 
         thread = threading.Thread(target=_listen_thread, daemon=True, name="pg-notify-listener")
         thread.start()
@@ -280,7 +329,15 @@ def send_notify(engine: Engine, table_name: str) -> None:
     Called by the service layer after committing an admin mutation.
     Must be called OUTSIDE the transaction (after commit) using a
     separate connection or autocommit mode.
+
+    The *table_name* is validated against an allowlist to prevent
+    SQL injection (F-005).
     """
+    if table_name not in ALLOWED_NOTIFY_TABLES:
+        raise ValueError(
+            f"Invalid table name for NOTIFY: '{table_name}'. "
+            f"Allowed: {sorted(ALLOWED_NOTIFY_TABLES)}"
+        )
     with engine.connect() as conn:
         conn.execute(text(f"NOTIFY {NOTIFY_CHANNEL}, '{table_name}'"))
         conn.commit()

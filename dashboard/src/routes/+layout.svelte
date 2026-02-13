@@ -3,36 +3,34 @@
 	import Sidebar from '$lib/components/Sidebar.svelte';
 	import FlashMessage from '$lib/components/FlashMessage.svelte';
 	import { auth } from '$lib/stores/auth';
+	import { currencyLabels } from '$lib/stores/currency';
 	import { onMount } from 'svelte';
+	import { updated } from '$app/stores';
+	import { beforeNavigate } from '$app/navigation';
 
 	let { children } = $props();
-	let sidebarOpen = $state(false);
 
 	onMount(() => {
 		auth.init();
+		currencyLabels.init();
+	});
+
+	// If SvelteKit detects a version mismatch (e.g. after a Docker rebuild),
+	// force a full page reload on the next navigation so the browser picks up
+	// the new JS bundles instead of 404-ing on stale chunk hashes.
+	beforeNavigate(({ willUnload, to }) => {
+		if ($updated && !willUnload && to?.url) {
+			location.href = to.url.href;
+		}
 	});
 </script>
 
 <div class="flex min-h-screen">
-	<Sidebar bind:open={sidebarOpen} />
+	<Sidebar />
 
-	<div class="flex-1 lg:ml-0">
-		<!-- Mobile topbar -->
-		<div class="lg:hidden sticky top-0 z-20 bg-surface-50/80 backdrop-blur border-b border-surface-300 px-4 py-3 flex items-center gap-3">
-			<button
-				class="p-2 rounded-lg hover:bg-surface-200 transition-colors"
-				onclick={() => (sidebarOpen = !sidebarOpen)}
-				aria-label="Toggle sidebar"
-			>
-				<svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-					<path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16" />
-				</svg>
-			</button>
-			<span class="text-sm font-semibold text-zinc-200">⚡ Synapse</span>
-		</div>
-
+	<div class="flex-1 min-w-0 overflow-x-hidden">
 		<!-- Page content -->
-		<main class="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto">
+		<main class="p-8">
 			{@render children()}
 		</main>
 	</div>

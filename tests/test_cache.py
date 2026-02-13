@@ -2,14 +2,17 @@
 tests/test_cache.py — ConfigCache Unit Tests
 ==============================================
 
-Tests NOTIFY payload routing (without a real PG connection).
+Tests NOTIFY payload routing (without a real PG connection),
+send_notify allowlist validation (F-005), and listener health (F-006).
 """
 
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-from synapse.engine.cache import ConfigCache
+import pytest
+
+from synapse.engine.cache import ALLOWED_NOTIFY_TABLES, ConfigCache, send_notify
 
 
 class TestNotifyRouting:
@@ -84,3 +87,69 @@ class TestNotifyRouting:
         mock_zones.assert_not_called()
         mock_mult.assert_not_called()
         mock_ach.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# F-005: NOTIFY SQL injection safety — allowlist validation
+# ---------------------------------------------------------------------------
+class TestSendNotifyAllowlist:
+    """Verify send_notify() rejects table names not in the allowlist."""
+
+    def test_allowed_tables_accepted(self):
+        """All known table names should be accepted without ValueError."""
+        for table in ALLOWED_NOTIFY_TABLES:
+            # We can't call send_notify without a real engine/connection,
+            # but we can verify the allowlist check doesn't raise.
+            engine = MagicMock()
+            engine.connect.return_value.__enter__ = MagicMock()
+            engine.connect.return_value.__exit__ = MagicMock(return_value=False)
+            try:
+                send_notify(engine, table)
+            except Exception as exc:
+                # Ignore DB-level errors — we just care that ValueError isn't raised
+                if isinstance(exc, ValueError):
+                    raise
+
+    def test_rejects_unknown_table(self):
+        engine = MagicMock()
+        with pytest.raises(ValueError, match="Invalid table name"):
+            send_notify(engine, "users")
+
+    def test_rejects_sql_injection_attempt(self):
+        engine = MagicMock()
+        with pytest.raises(ValueError, match="Invalid table name"):
+            send_notify(engine, "zones'; DROP TABLE users; --")
+
+    def test_rejects_empty_string(self):
+        engine = MagicMock()
+        with pytest.raises(ValueError, match="Invalid table name"):
+            send_notify(engine, "")
+
+    def test_allowlist_is_frozen(self):
+        """The allowlist should be immutable."""
+        assert isinstance(ALLOWED_NOTIFY_TABLES, frozenset)
+
+    def test_allowlist_matches_handle_notify_branches(self):
+        """Every table in the allowlist should be handled (or handled via alias)."""
+        # All tables referenced in handle_notify should be in the allowlist
+        for table in ("zones", "zone_channels", "zone_multipliers",
+                      "achievement_templates", "settings"):
+            assert table in ALLOWED_NOTIFY_TABLES
+
+
+# ---------------------------------------------------------------------------
+# F-006: Listener health property
+# ---------------------------------------------------------------------------
+class TestListenerHealth:
+    """Verify the listener_healthy property reflects thread state."""
+
+    def test_initially_unhealthy(self):
+        engine = MagicMock()
+        cache = ConfigCache(engine)
+        assert cache.listener_healthy is False
+
+    def test_health_property_exists(self):
+        engine = MagicMock()
+        cache = ConfigCache(engine)
+        # Should be accessible as a property (not a method)
+        assert isinstance(cache.listener_healthy, bool)

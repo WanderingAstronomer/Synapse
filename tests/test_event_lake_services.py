@@ -12,7 +12,7 @@ Tests for:
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -221,7 +221,6 @@ class TestBackfillService:
         """Should map MESSAGE → message_create, etc."""
         from synapse.services.backfill_service import (
             LEGACY_TYPE_MAP,
-            backfill_counters_from_activity_log,
         )
 
         assert LEGACY_TYPE_MAP["MESSAGE"] == "message_create"
@@ -310,18 +309,19 @@ class TestEventLakeAPI:
     def client(self):
         """Create a FastAPI test client."""
         from fastapi.testclient import TestClient
+
         from synapse.api.main import app
         return TestClient(app)
 
     @pytest.fixture
     def admin_token(self):
         """Generate a valid admin JWT for test requests."""
-        import os
-        from jose import jwt
-        secret = os.getenv("JWT_SECRET", "synapse-dev-secret-change-me")
+        import jwt
+
+        from synapse.api.deps import JWT_ALGORITHM, JWT_SECRET
         return jwt.encode(
             {"sub": "12345", "username": "TestAdmin", "is_admin": True},
-            secret, algorithm="HS256",
+            JWT_SECRET, algorithm=JWT_ALGORITHM,
         )
 
     def _auth_headers(self, token: str) -> dict:

@@ -12,9 +12,9 @@ from datetime import UTC, datetime, timedelta
 from urllib.parse import urlencode
 
 import httpx
+import jwt
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import RedirectResponse
-from jose import jwt
 
 from synapse.api.deps import JWT_ALGORITHM, JWT_SECRET, get_config, get_current_admin
 from synapse.config import SynapseConfig

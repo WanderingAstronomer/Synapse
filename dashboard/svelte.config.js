@@ -17,6 +17,12 @@ const config = {
 		adapter: adapter({ out: 'build' }),
 		alias: {
 			$lib: 'src/lib'
+		},
+		version: {
+			// Auto-detect app updates after Docker rebuilds.
+			// SvelteKit compares this at build time; when the client detects
+			// a mismatch it can trigger a full navigation instead of a 404.
+			pollInterval: 60000
 		}
 	}
 };

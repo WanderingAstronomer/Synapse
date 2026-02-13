@@ -134,6 +134,9 @@ class SynapseBot(commands.Bot):
         # --- Auto-discover guild channels and map to zones ------------------
         await self._auto_discover_channels()
 
+        # --- Audit text-channel access to catch permission override issues ---
+        await self._audit_text_channel_access()
+
         # --- Detect AFK voice channels for Event Lake tagging ---------------
         await self._detect_afk_channels()
 
@@ -199,38 +202,109 @@ class SynapseBot(commands.Bot):
     # Auto-discover guild channels and map to zones
     # -----------------------------------------------------------------------
     async def _auto_discover_channels(self) -> None:
-        """Scan guild channels and auto-map unmapped ones to zones."""
-        from synapse.database.engine import run_db
-        from synapse.services.channel_service import sync_guild_channels
+        """Build a guild snapshot and persist it for the setup wizard.
+
+        Instead of mapping channels to zones at startup (which requires
+        zones to already exist), the bot now captures a full snapshot of
+        the guild's channel structure and saves it to the ``Setting``
+        table.  The admin dashboard reads this snapshot during the
+        first-run bootstrap wizard.
+
+        If zones already exist (i.e. setup has completed), this also runs
+        the legacy channel-sync to map any newly created channels.
+        """
+        from synapse.services.setup_service import (
+            ChannelInfo,
+            GuildSnapshot,
+            save_guild_snapshot,
+        )
 
         for g in self.guilds:
             if g.id != self.cfg.guild_id:
                 continue
 
-            channels = []
+            # Build a rich channel snapshot
+            channel_infos: list[ChannelInfo] = []
+
+            # Categories first
+            for cat in g.categories:
+                channel_infos.append(ChannelInfo(
+                    id=cat.id,
+                    name=cat.name,
+                    type="category",
+                ))
+
+            # Text channels
             for ch in g.text_channels:
-                channels.append({
+                channel_infos.append(ChannelInfo(
+                    id=ch.id,
+                    name=ch.name,
+                    type="text",
+                    category_id=ch.category.id if ch.category else None,
+                    category_name=ch.category.name if ch.category else None,
+                ))
+
+            # Voice channels
+            for vc in g.voice_channels:
+                channel_infos.append(ChannelInfo(
+                    id=vc.id,
+                    name=vc.name,
+                    type="voice",
+                    category_id=vc.category.id if vc.category else None,
+                    category_name=vc.category.name if vc.category else None,
+                ))
+
+            # Forum channels
+            for fc in g.forums:
+                channel_infos.append(ChannelInfo(
+                    id=fc.id,
+                    name=fc.name,
+                    type="forum",
+                    category_id=fc.category.id if fc.category else None,
+                    category_name=fc.category.name if fc.category else None,
+                ))
+
+            # Stage channels
+            for sc in g.stage_channels:
+                channel_infos.append(ChannelInfo(
+                    id=sc.id,
+                    name=sc.name,
+                    type="stage",
+                    category_id=sc.category.id if sc.category else None,
+                    category_name=sc.category.name if sc.category else None,
+                ))
+
+            snapshot = GuildSnapshot(
+                guild_id=g.id,
+                guild_name=g.name,
+                channels=channel_infos,
+                afk_channel_id=g.afk_channel.id if g.afk_channel else None,
+            )
+            save_guild_snapshot(self.engine, snapshot)
+
+            # If zones exist, also run incremental channel-sync
+            from synapse.database.engine import run_db
+            from synapse.services.channel_service import sync_guild_channels
+
+            flat_channels = [
+                {
                     "id": ch.id,
                     "name": ch.name,
-                    "category_name": ch.category.name if ch.category else None,
-                })
-            for vc in g.voice_channels:
-                channels.append({
-                    "id": vc.id,
-                    "name": vc.name,
-                    "category_name": vc.category.name if vc.category else None,
-                })
-
-            if channels:
+                    "category_name": ch.category_name,
+                }
+                for ch in channel_infos
+                if ch.type != "category"
+            ]
+            if flat_channels:
                 mapped = await run_db(
-                    sync_guild_channels, self.engine, g.id, channels,
+                    sync_guild_channels, self.engine, g.id, flat_channels,
                 )
                 if mapped:
-                    # Reload the cache so new mappings take effect immediately
                     self.cache.load_all()
                     logger.info(
-                        "Auto-discovered %d channels, cache reloaded.", mapped
+                        "Incremental channel sync: %d new channels mapped.", mapped
                     )
+
             return  # Only process the primary guild
 
     # -----------------------------------------------------------------------
@@ -253,3 +327,38 @@ class SynapseBot(commands.Bot):
 
         self.lake_writer.set_afk_channels(afk_ids)
         logger.info("Event Lake AFK channel set: %s", afk_ids or "(none)")
+
+    async def _audit_text_channel_access(self) -> None:
+        """Log which text channels the bot can or cannot read in the primary guild."""
+        for g in self.guilds:
+            if g.id != self.cfg.guild_id:
+                continue
+
+            bot_member = g.me or g.get_member(self.user.id if self.user else 0)
+            if bot_member is None:
+                logger.warning(
+                    "Permission audit skipped: bot member not available in guild %s",
+                    g.id,
+                )
+                return
+
+            readable: list[str] = []
+            blocked: list[str] = []
+
+            for ch in g.text_channels:
+                perms = ch.permissions_for(bot_member)
+                label = f"#{ch.name} ({ch.id})"
+                if perms.view_channel and perms.read_message_history:
+                    readable.append(label)
+                else:
+                    blocked.append(label)
+
+            logger.info(
+                "Permission audit: %d readable text channels, %d blocked in guild %s",
+                len(readable), len(blocked), g.id,
+            )
+            if readable:
+                logger.info("Readable text channels: %s", ", ".join(readable))
+            if blocked:
+                logger.warning("Blocked text channels: %s", ", ".join(blocked))
+            return

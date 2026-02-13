@@ -1,6 +1,6 @@
-# 🧠 Project Synapse
+# Synapse
 
-**A modular community operating system for Discord** — captures activity, drives engagement through configurable economies and rules, and surfaces insights through a real-time dashboard. Deploy it for a student club, a nonprofit, a gaming guild, or a study group — then configure it to match your community's culture.
+A modular community operating system for Discord. Captures activity, drives engagement through a configurable economy, and surfaces insights through a real-time dashboard.
 
 ## Architecture
 
@@ -21,303 +21,452 @@
                      └──────────────┘
 ```
 
-**Four services** in Docker Compose:
-- **db** — PostgreSQL 16
-- **bot** — Discord bot (`python -m synapse.bot`)
-- **api** — FastAPI REST layer (`uvicorn synapse.api.main:app`)
-- **dashboard** — SvelteKit frontend (public analytics + admin panel)
+Four services in Docker Compose:
 
-### Three Pillars (v4.0)
+| Service | Runtime | Port | Purpose |
+|---------|---------|------|---------|
+| **db** | PostgreSQL 16 Alpine | 5432 | Persistent game state and configuration |
+| **bot** | Python 3.12 (discord.py) | — | Discord event processor and command handler |
+| **api** | Python 3.12 (FastAPI + Uvicorn) | 8000 | REST API for dashboard and admin operations |
+| **dashboard** | SvelteKit 2 (Node adapter) | 3000 | Public analytics and admin panel |
 
-| Pillar | Purpose | Status |
-|--------|---------|--------|
-| **Event Lake** | Captures ephemeral Discord gateway events | 📋 Planned (P4) |
-| **Ledger** | Configurable currencies, wallets, transactions | 📋 Planned (P5) |
-| **Rules Engine** | IFTTT-style trigger/condition/effect rules | 📋 Planned (P6) |
+## Tech Stack
 
-## Configurable Economy
+**Backend:** Python 3.12, discord.py, FastAPI, Uvicorn, SQLAlchemy 2.0, Alembic, PyJWT, httpx, psycopg2  
+**Frontend:** SvelteKit 2 (Svelte 5), TypeScript, Tailwind CSS, Chart.js, Vite  
+**Infrastructure:** Docker (multi-stage builds), Docker Compose, PostgreSQL 16, uv (package manager)  
+**Quality:** pytest, Ruff (linting + formatting), mypy, svelte-check
 
-Admins define their own currencies — or use presets:
-
-| Default (Classic Gamification) | Function | Configurable? |
-|-------------------------------|----------|---------------|
-| **XP** ✨ | Progression (drives leveling) | Name, symbol, level curve |
-| **Stars** ⭐ | Seasonal recognition | Name, seasonal toggle |
-| **Gold** 🪙 | Spendable currency | Name, spend rules |
-
-Communities can define any number of currencies with any names, or run with
-no economy at all (Analytics Only preset).
-
-## Regions & Multipliers
-
-Channels are grouped into **Regions** (e.g., programming, cybersecurity, general, memes). Each region has per-event-type multipliers stored in PostgreSQL, editable in the admin dashboard. (Regions are the v4.0 internal name for what the admin sees as their configured label — "Zones," "Areas," "Channels," etc.)
-
-## Event Pipeline (Current — v3.0)
-
-```
-Discord Event → SynapseEvent → Zone Classification → Quality Modifier
-→ Anti-Gaming → Multiplier Application → XP Cap → Idempotent Persist
-→ Stat Update → Achievement Check → Level-Up Check
-```
-
-**v4.0 Pipeline (Planned):**
-```
-Discord Event → Event Lake → Rules Engine → Ledger Transactions
-→ Milestone Check → Announcements
-```
-
-**Anti-gaming measures**: self-reaction filter, unique-reactor weighting, per-user per-target caps, diminishing returns, reaction velocity cap. These become configurable rule conditions in v4.0.
-
-## Milestones (Achievements)
-
-Current (v3.0) trigger types:
-- `counter_threshold` — Stat field reaches a value (e.g., 100 messages)
-- `star_threshold` — Season or lifetime stars reach a value
-- `xp_milestone` — XP reaches a value
-- `custom` — Admin-granted only
-
-v4.0 adds compound requirements, streak tracking, and requirement
-expressions against the Ledger and Event Lake.
-
-11 default milestones included (First Steps, Rising Star, Chatterbox, etc.)
-
-## Bot Commands
-
-| Command | Access | Description |
-|---------|--------|-------------|
-| `/profile [member]` | Everyone | XP, level, gold, stars, achievements, rank |
-| `/leaderboard [xp\|stars]` | Everyone | Top members by XP or Stars |
-| `/link-github <username>` | Everyone | Associate GitHub account |
-| `/preferences <setting> <on\|off>` | Everyone | Toggle announcement preferences (level-ups, achievements, awards) |
-| `/buy-coffee` | Everyone | Spend gold (minimal gold sink) |
-| `/award <member> [xp] [gold] [reason]` | Admin | Manual XP/Gold award |
-| `/create-achievement ...` | Admin | Create new achievement template |
-| `/grant-achievement <member> <id>` | Admin | Grant achievement to user |
-| `/season <name> [days]` | Admin | Create new season (rolls over) |
-
-## Dashboard
-
-### Community Dashboard (Public)
-- **Overview** — Hero banner with live metrics (total members, XP, active users, top level)
-- **Leaderboard** — Paginated XP / Gold / Level tabs with Discord avatars and progress bars
-- **Activity** — Chart.js stacked bar chart (daily event breakdown), filterable event feed
-- **Achievements** — Card grid with rarity glow effects, category/rarity filters, recent earners
-
-### Admin Panel (JWT-gated via Discord OAuth)
-- Discord OAuth2 → FastAPI issues JWT → SvelteKit stores token
-- Admin role check (requires `admin_role_id` from config)
-- **Zones** — Create/edit zones with channel IDs and multipliers
-- **Achievements** — Full builder with all fields, table view, toggle active
-- **Awards** — User search, XP/Gold grant, achievement grant
-- **Settings** — Category-filtered inline editor with bulk save
-- **Audit Log** — Expandable entries with before/after JSON snapshots
-
-Rate limited: 30 mutations/minute per admin session.
-
-## Setup
+## Quick Start
 
 ### Prerequisites
-- Python 3.12+
-- PostgreSQL 16
-- [uv](https://docs.astral.sh/uv/) package manager
-- Discord bot token
 
-### Environment Variables
+- Docker and Docker Compose
+- A Discord bot token ([Developer Portal](https://discord.com/developers/applications))
+- Two privileged intents enabled: **Message Content** and **Server Members**
+
+### Setup
+
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/WanderingAstronomer/Synapse.git
+   cd Synapse
+   ```
+
+2. Copy the environment file and fill in your secrets:
+   ```bash
+   cp .env.example .env
+   ```
+
+   Required variables:
+   | Variable | Description |
+   |----------|-------------|
+   | `DISCORD_TOKEN` | Bot token from Discord Developer Portal |
+   | `DATABASE_URL` | PostgreSQL connection string (auto-set in Docker) |
+   | `JWT_SECRET` | Min 32-char secret for admin JWT signing |
+   | `DISCORD_CLIENT_ID` | OAuth2 client ID for dashboard login |
+   | `DISCORD_CLIENT_SECRET` | OAuth2 client secret |
+   | `DISCORD_REDIRECT_URI` | OAuth2 callback URL |
+   | `FRONTEND_URL` | Dashboard base URL |
+
+3. Edit `config.yaml` with your community info:
+   ```yaml
+   community_name: "My Community"
+   community_motto: "Our tagline"
+   bot_prefix: "!"
+   guild_id: 123456789              # Your Discord server ID
+   dashboard_port: 3000
+   admin_role_id: 123456789         # Discord role ID for admin access
+   announce_channel_id: null        # Optional: override announcement channel
+   ```
+
+4. Start the stack:
+   ```bash
+   docker compose up -d --build
+   ```
+
+5. Open the dashboard at `http://localhost:3000` and log in with Discord OAuth to run the first-time bootstrap wizard at `/admin/setup`.
+
+### Running Without Docker
 
 ```bash
-# .env
-DISCORD_TOKEN=your-bot-token
-DATABASE_URL=postgresql://synapse:synapse@localhost:5432/synapse
-
-# Dashboard admin auth
-DISCORD_CLIENT_ID=your-oauth-app-id
-DISCORD_CLIENT_SECRET=your-oauth-secret
-DISCORD_REDIRECT_URI=http://localhost:5173/auth/callback
-JWT_SECRET=your-random-secret    # openssl rand -hex 32
-FRONTEND_URL=http://localhost:5173
-
-DEV_GUILD_ID=your-guild-id  # For instant slash command sync
-```
-
-### Local Development
-
-```bash
-# Install Python dependencies
+# Install dependencies
 uv sync
 
-# Install Node dependencies (dashboard)
-cd dashboard && npm install && cd ..
-
-# Start PostgreSQL (via Docker or local)
-docker compose up -d db
+# Start PostgreSQL separately, set DATABASE_URL in .env
 
 # Run the bot
 uv run python -m synapse.bot
 
 # Run the API (separate terminal)
-uv run uvicorn synapse.api.main:app --reload --port 8000
+uv run uvicorn synapse.api.main:app --host 0.0.0.0 --port 8000
 
 # Run the dashboard (separate terminal)
-cd dashboard && npm run dev
-
-# Run tests
-uv run pytest tests/ -v
+cd dashboard && npm install && npm run dev
 ```
 
-### Docker Compose (Full Stack)
+## Economy System
 
-```bash
-docker compose up --build
+Three default currencies, all configurable via the admin dashboard:
+
+| Currency | Default Name | Purpose |
+|----------|-------------|---------|
+| **XP** | XP | Progression — drives leveling via exponential formula: `base × factor^level` |
+| **Stars** | Stars | Seasonal recognition — tracked per-season and lifetime |
+| **Gold** | Gold | Spendable currency — awarded on level-up, spent via `/buy-coffee` |
+
+All currency names, rates, and behaviors are stored in the `settings` database table and editable from the admin dashboard without redeploying.
+
+### Leveling Formula
+
+```
+XP required for level N = level_base × (level_factor ^ N)
 ```
 
-### Reality Check (30s)
+Defaults: `level_base = 100`, `level_factor = 1.25`. Both configurable.
 
-```bash
-docker compose ps
-curl http://localhost:8000/api/health
-curl -I http://localhost:3000
-docker compose logs api --tail=50
+## Zones
+
+Channels are grouped into **Zones** (mapped from Discord categories during bootstrap). Each zone has per-event-type multipliers for XP and Stars, editable in the admin dashboard. Unmapped channels fall back to a "general" zone or the first available zone.
+
+## Event Pipeline
+
+```
+Discord Event → Event Lake Write → SynapseEvent → Zone Classification
+→ Multiplier Lookup → Quality Modifier → Anti-Gaming Checks → XP Cap
+→ Idempotent Persist → Stat Update → Achievement Check → Level-Up Check
+→ Announcement (throttle-gated, preference-gated)
 ```
 
-### First-Run Setup
+### Tracked Event Types
 
-After starting the stack for the first time:
+| Event | Source | Rewards |
+|-------|--------|---------|
+| `MESSAGE` | `on_message` | XP + Stars (cooldown-gated per user/channel) |
+| `REACTION_GIVEN` | `on_raw_reaction_add` | XP + Stars for reactor |
+| `REACTION_RECEIVED` | `on_raw_reaction_add` | XP + Stars for message author (anti-gaming protected) |
+| `THREAD_CREATE` | `on_thread_create` | XP + Stars |
+| `VOICE_TICK` | Background task (10 min) | XP + Stars (idle-detection: muted+deafened users skipped) |
+| `MANUAL_AWARD` | `/award` command | Admin-specified XP/Gold |
+| `LEVEL_UP` | Automatic on level threshold | Gold bonus |
+| `ACHIEVEMENT_EARNED` | Automatic on trigger | Template-defined XP/Gold |
 
-1. The bot connects to Discord and captures your server's channel layout.
-2. Navigate to `http://localhost:3000` and sign in with Discord.
-3. You'll be redirected to the **Setup Wizard** which shows the detected
-   guild structure (categories, channels, voice channels).
-4. Click **Run Bootstrap** to auto-create zones from categories, map
-   channels, create a default season, and write baseline settings.
-5. Once complete, the normal admin dashboard unlocks.
+### Quality Modifiers (MESSAGE only)
 
-Bootstrap is idempotent — you can re-run it safely from **Admin → Setup**
-if you add new channels or categories to your Discord server.
+Applied multiplicatively to XP. All thresholds configurable:
 
-### Configuration
+| Condition | Modifier |
+|-----------|----------|
+| Content > 500 chars | ×1.5 |
+| Content > 200 chars | ×1.2 |
+| Contains code block | ×1.4 |
+| Contains link | ×1.25 |
+| Contains attachment | ×1.1 |
+| Emoji count > 5 | ×0.5 |
 
-Edit `config.yaml` for community-specific settings:
+Floor: 0.1 (no event produces zero XP).
 
-```yaml
-community_name: "Your Community"
-guild_id: 123456789          # Your Discord server ID
-admin_role_id: 987654321     # Admin role ID
-cooldown_seconds: 60
-level_base: 100
-level_factor: 1.25
-gold_per_level_up: 50
-```
+### Anti-Gaming Measures
+
+- **Self-reaction filter:** Zero rewards for reacting to your own messages
+- **Pair cap:** Max 3 reactions per reactor→author pair per 24h sliding window
+- **Diminishing returns:** Factor `1/(1+count)` on repeated reactor→author interactions
+- **Unique-reactor weighting:** Star scaling based on distinct reactors
+- **Velocity cap:** XP capped to 5 for messages with >10 reactors and <5min age
+- **Message cooldown:** Per-user per-channel cooldown (default 30s) on MESSAGE rewards
+
+## Event Lake
+
+Append-only capture of all ephemeral Discord gateway events. The bot writes every event regardless of whether any reward rule acts on it.
+
+### Captured Event Types
+
+`message_create`, `reaction_add`, `reaction_remove`, `thread_create`, `voice_join`, `voice_leave`, `voice_move`, `member_join`, `member_leave`
+
+Each data source can be toggled on/off from the admin dashboard. Message content is **never** persisted — only metadata (length, has_code, has_link, etc.).
+
+### Pre-Computed Counters
+
+`event_counters` table maintains pre-aggregated counts by `(user_id, event_type, zone_id, period)` for O(1) reads. Periods: `lifetime`, `season`, `day:YYYY-MM-DD`.
+
+### Maintenance
+
+- **Retention cleanup:** Daily background task deletes events older than `event_lake_retention_days` (default 90). Batch size: 5,000 rows.
+- **Reconciliation:** Weekly background task validates lifetime counters against raw Event Lake data and corrects drift.
+- **Backfill:** One-shot utility to migrate legacy `activity_log` data into `event_counters`.
+
+## Achievements
+
+Admin-defined recognition templates with four trigger types:
+
+| Type | Trigger |
+|------|---------|
+| `counter_threshold` | Stat field (messages_sent, reactions_given, etc.) reaches a value |
+| `star_threshold` | Season or lifetime stars reach a value |
+| `xp_milestone` | Total XP reaches a value |
+| `custom` | Manual grant by admin only |
+
+Five rarity tiers: Common, Uncommon, Rare, Epic, Legendary — each with distinct colors and emoji.
+
+Achievements are checked automatically after every reward event. Earned achievements grant template-defined XP and Gold bonuses.
+
+## Bot Commands
+
+### User Commands
+
+| Command | Parameters | Description |
+|---------|-----------|-------------|
+| `/profile` | `[member]` | View your (or another member's) profile: level, XP, gold, rank, stats, achievements, GitHub link |
+| `/leaderboard` | `[sort_by: XP\|Stars]` | Top members leaderboard (size from settings, default 25) |
+| `/link-github` | `<username>` | Associate your GitHub account |
+| `/preferences` | `<setting> <on\|off>` | Toggle announcement visibility (level-ups, achievements, awards) |
+| `/buy-coffee` | — | Spend gold (cost from `coffee_gold_cost` setting, default 50) |
+
+### Admin Commands
+
+| Command | Parameters | Description |
+|---------|-----------|-------------|
+| `/award` | `<member> [xp] [gold] [reason]` | Manual XP/Gold award |
+| `/create-achievement` | `<name> <description> [type] [field] [value] [xp_reward] [gold_reward] [rarity]` | Create achievement template |
+| `/grant-achievement` | `<member> <achievement_id>` | Grant achievement to a member |
+| `/season` | `<name> [duration_days]` | Create new season (deactivates current, default 120 days) |
+
+Admin commands require the Discord role matching `admin_role_id` in `config.yaml`.
+
+## REST API
+
+Base URL: `/api`
+
+### Public Endpoints (No Auth)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/health` | Liveness probe |
+| GET | `/health/bot` | Bot heartbeat status |
+| GET | `/metrics` | Overview: total users, total XP, 7-day actives, top level, achievements earned |
+| GET | `/leaderboard/{currency}` | Paginated leaderboard (xp, gold, or level) |
+| GET | `/activity` | Event feed + daily aggregation for charts |
+| GET | `/achievements` | Active templates with earner counts |
+| GET | `/achievements/recent` | Recently earned achievements |
+| GET | `/settings/public` | Public dashboard settings (title, currency names, etc.) |
+
+### Auth Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/auth/login` | Redirect to Discord OAuth2 |
+| GET | `/auth/callback` | OAuth2 code exchange, admin role check, JWT issuance |
+| GET | `/auth/me` | Current admin info |
+
+### Admin Endpoints (JWT Required)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET/POST/PATCH | `/admin/zones` | Zone CRUD |
+| GET/POST/PATCH | `/admin/achievements` | Achievement template CRUD |
+| POST | `/admin/awards/xp-gold` | Manual XP/Gold award |
+| POST | `/admin/awards/achievement` | Grant achievement |
+| GET | `/admin/users` | User search (for admin dropdowns) |
+| GET/PUT | `/admin/settings` | Settings CRUD |
+| GET | `/admin/audit` | Paginated audit log |
+| GET/POST | `/admin/setup/*` | First-run bootstrap |
+| GET/PUT | `/admin/logs` | Live log viewer + level control |
+| POST | `/admin/resolve-names` | Snowflake ID → name resolution |
+
+### Event Lake Admin Endpoints (JWT Required)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/admin/event-lake/events` | Paginated, filterable event browser |
+| GET/PUT | `/admin/event-lake/data-sources` | Toggle data source capture |
+| GET | `/admin/event-lake/health` | Volume metrics, storage, daily trends |
+| GET | `/admin/event-lake/storage-estimate` | Storage projection |
+| POST | `/admin/event-lake/retention/run` | Trigger retention cleanup |
+| POST | `/admin/event-lake/reconciliation/run` | Trigger counter reconciliation |
+| POST | `/admin/event-lake/backfill/run` | Trigger activity_log backfill |
+| GET | `/admin/event-lake/counters` | Browse pre-computed counters |
+
+### Security
+
+- **Authentication:** Discord OAuth2 → JWT (HS256, 12-hour expiry)
+- **Admin gating:** JWT validated on every admin request; user must have `admin_role_id` in their Discord guild roles
+- **JWT secret validation:** API startup rejects missing, blank, short (<32 chars), and known-weak secrets
+- **Rate limiting:** 30 admin mutations/minute per admin (sliding window), 429 with `Retry-After` header
+- **CORS:** Configured for localhost development origins
+
+## Dashboard
+
+### Public Pages
+
+| Route | Description |
+|-------|-------------|
+| `/` | Overview — hero metrics, activity ticker, champion spotlight, recent achievements |
+| `/leaderboard` | Full paginated leaderboard |
+| `/activity` | Activity feed with daily charts |
+| `/achievements` | Achievement gallery with earn percentages |
+
+### Admin Pages
+
+| Route | Description |
+|-------|-------------|
+| `/admin/setup` | First-run bootstrap wizard |
+| `/admin/zones` | Zone management (channels, multipliers) |
+| `/admin/achievements` | Achievement template builder |
+| `/admin/awards` | Manual XP/Gold/Achievement awards |
+| `/admin/settings` | Dashboard and economy settings editor |
+| `/admin/audit` | Admin audit log viewer |
+| `/admin/logs` | Live log viewer with level control |
+| `/admin/data-sources` | Event Lake data source toggles |
+
+The dashboard runs as a client-side SPA (SSR disabled). Admin pages are gated by JWT auth and auto-redirect to the setup wizard if the guild hasn't been bootstrapped. A built-in API proxy (`/api/[...path]` → FastAPI backend) avoids CORS issues in production.
+
+## Database
+
+PostgreSQL 16 with 15 tables:
+
+| Table | Purpose |
+|-------|---------|
+| `users` | Discord member profiles (snowflake PK, XP, level, gold) |
+| `user_stats` | Per-season engagement counters (messages, reactions, threads, voice) |
+| `seasons` | Competitive time windows |
+| `activity_log` | Append-only event journal with idempotent insert |
+| `zones` | Channel groupings |
+| `zone_channels` | Zone ↔ channel mapping |
+| `zone_multipliers` | Per-zone, per-event-type XP/Star weights |
+| `achievement_templates` | Admin-defined recognition with rarity and rewards |
+| `user_achievements` | Earned badges with timestamps |
+| `quests` | Gamified tasks (schema present, UI deferred) |
+| `admin_log` | Append-only audit trail with before/after JSONB snapshots |
+| `user_preferences` | Per-user announcement opt-outs |
+| `settings` | Key-value configuration store (JSON values, categorized) |
+| `event_lake` | Append-only ephemeral event capture with JSONB payloads |
+| `event_counters` | Pre-computed aggregation cache by user/type/zone/period |
+
+### Key Patterns
+
+- **Idempotent insert:** Partial unique index on `(source_system, source_event_id)` prevents duplicate event processing
+- **LISTEN/NOTIFY:** Cache invalidation via PostgreSQL notifications — admin changes propagate to the bot's in-memory `ConfigCache` within seconds
+- **Async bridge:** `await run_db(sync_fn, *args)` ships synchronous SQLAlchemy calls to `asyncio.to_thread()` so the bot event loop is never blocked
+
+## Background Tasks
+
+| Task | Interval | Description |
+|------|----------|-------------|
+| `heartbeat_loop` | 30 seconds | Writes bot heartbeat for dashboard health display |
+| `voice_tick_loop` | 10 minutes | Awards XP/Stars to non-idle voice participants (max 6 ticks/hour) |
+| `retention_loop` | 24 hours | Cleans Event Lake rows older than retention threshold |
+| `reconciliation_loop` | 7 days | Validates lifetime counters against raw events |
+| Announcement drain | ~10 seconds | Sends queued embeds from throttle overflow |
+
+## Configuration
+
+All gameplay tuning is stored in the `settings` database table, editable from the admin dashboard. `config.yaml` contains only infrastructure/identity settings.
+
+### Default Settings (written during bootstrap)
+
+| Category | Settings |
+|----------|----------|
+| **Economy** | `xp_base_message` (15), `xp_base_reaction_given` (5), `xp_base_reaction_received` (8), `xp_base_thread` (20), `xp_base_voice_tick` (10), `gold_per_level_up` (50), `coffee_gold_cost` (50) |
+| **Leveling** | `level_base` (100), `level_factor` (1.25) |
+| **Anti-Gaming** | `cooldown_seconds` (30), `max_reactions_per_pair_per_day` (3), `xp_cap_reaction_burst` (5) |
+| **Quality** | `quality_length_medium` (200), `quality_length_long` (500), `quality_multiplier_long` (1.5), `quality_multiplier_code` (1.4) |
+| **Display** | `currency_name_primary` (XP), `currency_name_secondary` (Gold), `leaderboard_size` (25) |
+| **Announcements** | `announce_level_ups` (true), `announce_achievements` (true) |
+| **Event Lake** | `event_lake_retention_days` (90), `voice_tick_minutes` (10) |
 
 ## Project Structure
 
 ```
 synapse/
-├── api/
-│   ├── main.py              # FastAPI app (CORS, lifespan, router mounting)
-│   ├── deps.py              # Dependency injection (engine, config, session, JWT auth)
-│   ├── auth.py              # Discord OAuth2 flow + JWT issuance
-│   └── routes/
-│       ├── public.py        # Public endpoints (metrics, leaderboard, activity, achievements)
-│       └── admin.py         # Admin CRUD (zones, achievements, awards, settings, audit)
+├── config.py              # YAML config loader (infrastructure only)
+├── constants.py           # Rarity maps, leveling formula
 ├── bot/
-│   ├── __main__.py          # Entry point
-│   ├── core.py              # SynapseBot class + extension loader
+│   ├── __main__.py        # Entry point: python -m synapse.bot
+│   ├── core.py            # SynapseBot class, cog loader, lifecycle hooks
 │   └── cogs/
-│       ├── social.py        # on_message XP/Star pipeline
-│       ├── reactions.py     # on_reaction XP/Star pipeline
-│       ├── voice.py         # Voice tick + thread creation
-│       ├── meta.py          # /profile, /leaderboard, /preferences, /buy-coffee
-│       └── admin.py         # /award, /create-achievement, /grant-achievement
+│       ├── social.py      # on_message → reward pipeline
+│       ├── reactions.py   # on_raw_reaction_add/remove → rewards + lake
+│       ├── voice.py       # Voice state tracking + 10min tick loop
+│       ├── threads.py     # on_thread_create → rewards
+│       ├── membership.py  # on_member_join/remove → lake capture only
+│       ├── meta.py        # /profile, /leaderboard, /link-github, etc.
+│       ├── admin.py       # /award, /create-achievement, etc.
+│       └── tasks.py       # Heartbeat, retention, reconciliation loops
 ├── database/
-│   ├── engine.py            # SQLAlchemy engine + async bridge
-│   └── models.py            # 15 tables (SQLAlchemy 2.0 Mapped)
+│   ├── engine.py          # Engine creation, session helper, async bridge
+│   └── models.py          # 15 SQLAlchemy ORM models
 ├── engine/
-│   ├── events.py            # SynapseEvent dataclass + base XP/Stars
-│   ├── reward.py            # Pure reward calculation pipeline
-│   ├── achievements.py      # Achievement check logic
-│   └── cache.py             # In-memory config cache + PG LISTEN/NOTIFY
+│   ├── events.py          # SynapseEvent dataclass, base XP/Star tables
+│   ├── reward.py          # Pure calculation pipeline (no I/O)
+│   ├── quality.py         # Message quality modifiers
+│   ├── anti_gaming.py     # Pair caps, diminishing returns, velocity limits
+│   ├── achievements.py    # Achievement trigger checking
+│   └── cache.py           # In-memory ConfigCache + PG LISTEN/NOTIFY
 ├── services/
-│   ├── reward_service.py    # Event persistence + reward application
-│   ├── admin_service.py     # Audit-logged admin mutations
-│   ├── setup_service.py     # First-run bootstrap + guild discovery
-│   └── channel_service.py   # Incremental channel-to-zone mapping
-└── config.py                # YAML config loader
+│   ├── reward_service.py       # Calculate → persist → stats → achievements
+│   ├── announcement_service.py # Preference-gated, throttle-safe announcements
+│   ├── event_lake_writer.py    # Event Lake writes with counter updates
+│   ├── admin_service.py        # Zone/achievement/season CRUD + audit logging
+│   ├── settings_service.py     # Settings read/write with NOTIFY
+│   ├── channel_service.py      # Guild channel → zone auto-mapping
+│   ├── setup_service.py        # First-run bootstrap, guild snapshots
+│   ├── retention_service.py    # Event Lake cleanup
+│   ├── reconciliation_service.py # Counter drift correction
+│   ├── backfill_service.py     # Legacy activity_log migration
+│   ├── embeds.py               # Discord embed builders
+│   ├── throttle.py             # Announcement rate limiter
+│   └── log_buffer.py           # In-memory ring buffer for live logs
+└── api/
+    ├── main.py            # FastAPI app setup
+    ├── auth.py            # Discord OAuth2 → JWT
+    ├── deps.py            # Dependency injection, JWT validation
+    ├── rate_limit.py      # Per-admin mutation rate limiting
+    └── routes/
+        ├── public.py      # Read-only public endpoints
+        ├── admin.py       # Admin CRUD endpoints
+        └── event_lake.py  # Event Lake management endpoints
 
-dashboard/                   # SvelteKit frontend (separate Node project)
+dashboard/
 ├── src/
-│   ├── lib/
-│   │   ├── api.ts           # Typed fetch client for all API endpoints
-│   │   ├── utils.ts         # Formatters, time helpers, event colors
-│   │   ├── stores/          # Svelte stores (auth, flash notifications)
-│   │   └── components/      # Reusable UI (HeroHeader, Sidebar, MetricCard, etc.)
-│   └── routes/
-│       ├── +page.svelte             # Overview (metrics, top members, recent achievements)
-│       ├── leaderboard/+page.svelte # Paginated XP/Gold/Level leaderboard
-│       ├── activity/+page.svelte    # Chart.js daily chart + event feed
-│       ├── achievements/+page.svelte # Achievement card grid with filters
-│       ├── auth/callback/+page.svelte # OAuth token handler
-│       └── admin/                   # Auth-guarded admin pages
-│           ├── setup/+page.svelte
-│           ├── zones/+page.svelte
-│           ├── achievements/+page.svelte
-│           ├── awards/+page.svelte
-│           ├── settings/+page.svelte
-│           └── audit/+page.svelte
-├── tailwind.config.js       # Custom brand colors, animations
-├── package.json             # SvelteKit 2, Svelte 5, Tailwind, Chart.js
-└── Dockerfile               # Multi-stage Node build for production
+│   ├── routes/            # SvelteKit pages (4 public + 8 admin)
+│   └── lib/
+│       ├── api.ts         # Typed API client
+│       ├── utils.ts       # Formatting helpers
+│       ├── stores/        # auth, currency, flash, names
+│       └── components/    # 10 reusable Svelte components
+
+tests/                     # 12 test files, ~3,200 lines, in-memory SQLite
+alembic/                   # Database migrations
 ```
 
-## Implemented vs Planned
+## Development
 
-### ✅ Implemented (P0–P3.5)
-- Full economy (XP + Stars + Gold) — hardcoded, to be replaced by Ledger in P5
-- Zone-based multipliers with per-event-type granularity
-- Quality-weighted message XP (length, code, links, attachments)
-- Anti-gaming suite (self-reaction filter, unique-reactor weighting, diminishing returns)
-- Idempotent event persistence (ON CONFLICT DO NOTHING)
-- PG LISTEN/NOTIFY cache invalidation (no Redis)
-- Achievement system (4 trigger types, auto-discovered from presets)
-- First-run setup wizard with auto guild layout detection
-- Seasonal stats with season rollover
-- FastAPI REST API with typed endpoints
-- SvelteKit dashboard with cyber-industrial aesthetic + Chart.js
-- Discord OAuth → JWT admin authentication with role check
-- Audit-logged admin mutations with before/after visual diffs
-- Rate-limited admin panel (30 mutations/min)
-- Voice channel XP with anti-idle
-- Thread creation tracking
-- Discord avatar integration (CDN URL construction)
+### Running Tests
 
-### 📋 Planned (v4.0 — P5–P8)
-- **Configurable Currencies** — Admin-defined currencies, wallets, transaction ledger
-- **Rules Engine** — IFTTT-style configurable rules replacing hardcoded pipeline
-- **Milestones v2** — Compound requirements against Ledger + Event Lake
-- **Module System** — Toggle Economy, Milestones, Analytics, Announcements, Seasons
-- **Taxonomy System** — Admin-configurable labels for all internal terms
-- **Preset System** — Classic Gamification, Analytics Only, Minimal Engagement
-- **Rule Builder UI** — Visual trigger/condition/effect editor in dashboard
+```bash
+uv run pytest tests/ -v
+```
 
-### 💭 Backlog
-- **GitHub Neural Bridge** — GitHub webhook → event source
-- **LLM Quality Modifier** — AI-based content quality scoring
-- **Recipe Marketplace** — Community-contributed configuration presets
-- **Intelligence** — AI quest generation, smart suggestions
+Tests use in-memory SQLite (with a JSONB→TEXT shim) for full isolation — no PostgreSQL required.
 
-## Tech Stack
+### Linting
 
-| Component | Technology |
-|-----------|-----------|
-| Bot | discord.py 2.6+ |
-| Database | PostgreSQL 16 (JSONB, partial indexes, LISTEN/NOTIFY) |
-| ORM | SQLAlchemy 2.0 (Mapped[] style, sync + asyncio.to_thread) |
-| API | FastAPI + uvicorn |
-| Frontend | SvelteKit 2 + Svelte 5 + Tailwind CSS 3.4 + Chart.js 4 |
-| Auth | Discord OAuth2 → FastAPI JWT (HS256 via python-jose) |
-| Runtime | Python 3.12+, Node.js 22 |
-| Package Managers | uv (Python), npm (Node) |
-| Container | Docker Compose (4 services: db, bot, api, dashboard) |
+```bash
+uv run ruff check synapse/ tests/
+uv run ruff format synapse/ tests/
+uv run mypy synapse/
+```
+
+### Database Migrations
+
+```bash
+# Generate a migration after model changes
+uv run alembic revision --autogenerate -m "description"
+
+# Apply migrations
+uv run alembic upgrade head
+```
 
 ## License
 
-MIT
+See repository for license details.

@@ -6,6 +6,7 @@
 	import EmptyState from '$lib/components/EmptyState.svelte';
 	import ProgressBar from '$lib/components/ProgressBar.svelte';
 	import SynapseLoader from '$lib/components/SynapseLoader.svelte';
+	import { primaryCurrency } from '$lib/stores/currency';
 	import { fmt, timeAgo, capitalize } from '$lib/utils';
 
 	let achievements = $state<Achievement[]>([]);
@@ -141,7 +142,7 @@
 					<!-- Rewards -->
 					<div class="flex items-center gap-3 text-xs mb-3">
 						{#if ach.xp_reward > 0}
-							<span class="text-brand-400 font-medium">✨ {fmt(ach.xp_reward)} XP</span>
+							<span class="text-brand-400 font-medium">✨ {fmt(ach.xp_reward)} {$primaryCurrency}</span>
 						{/if}
 						{#if ach.gold_reward > 0}
 							<span class="text-gold-400 font-medium">🪙 {fmt(ach.gold_reward)}</span>
