@@ -92,11 +92,6 @@ class AntiGamingTracker:
 _default_anti_gaming = AntiGamingTracker()
 
 
-def get_default_tracker() -> AntiGamingTracker:
-    """Return the module-level default AntiGamingTracker for production use."""
-    return _default_anti_gaming
-
-
 # ---------------------------------------------------------------------------
 # Anti-gaming stage functions
 # ---------------------------------------------------------------------------

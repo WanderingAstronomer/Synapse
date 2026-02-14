@@ -1,14 +1,27 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { page } from '$app/stores';
 	import { api, type LogEntry } from '$lib/api';
-	import { flash } from '$lib/stores/flash';
+	import { LOG_LEVELS } from '$lib/constants';
+	import { flash } from '$lib/stores/flash.svelte';
+	import AuditLogView from '$lib/components/AuditLogView.svelte';
+
+	// ---------------------------------------------------------------------------
+	// Tab state — driven by ?tab= query param, default "live"
+	// ---------------------------------------------------------------------------
+	let activeTab = $state<'live' | 'audit'>('live');
+
+	$effect(() => {
+		const tab = $page.url.searchParams.get('tab');
+		activeTab = tab === 'audit' ? 'audit' : 'live';
+	});
 
 	// ---------------------------------------------------------------------------
 	// State
 	// ---------------------------------------------------------------------------
 	let entries = $state<LogEntry[]>([]);
 	let captureLevel = $state('DEBUG');
-	let validLevels = $state<string[]>(['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']);
+	let validLevels = $state<string[]>(LOG_LEVELS);
 	let loading = $state(true);
 	let autoRefresh = $state(true);
 	let intervalId = $state<number | null>(null);
@@ -148,10 +161,29 @@
 </script>
 
 <svelte:head>
-	<title>Logs · Synapse</title>
+	<title>{activeTab === 'audit' ? 'Audit Log' : 'Live Logs'} · Synapse</title>
 </svelte:head>
 
-<div class="flex flex-col h-[calc(100vh-1rem)] gap-4 p-6">
+<!-- Tab Switcher -->
+<div class="flex items-center gap-1 mb-4 bg-surface-100 border border-surface-300 rounded-xl p-1 w-fit">
+	<button
+		class="px-4 py-2 rounded-lg text-sm font-medium transition-all {activeTab === 'live' ? 'bg-brand-600 text-white shadow-lg shadow-brand-500/20' : 'text-zinc-400 hover:text-zinc-200 hover:bg-surface-200'}"
+		onclick={() => { activeTab = 'live'; history.replaceState(null, '', '/admin/logs?tab=live'); }}
+	>
+		Live Logs
+	</button>
+	<button
+		class="px-4 py-2 rounded-lg text-sm font-medium transition-all {activeTab === 'audit' ? 'bg-brand-600 text-white shadow-lg shadow-brand-500/20' : 'text-zinc-400 hover:text-zinc-200 hover:bg-surface-200'}"
+		onclick={() => { activeTab = 'audit'; history.replaceState(null, '', '/admin/logs?tab=audit'); }}
+	>
+		Audit Log
+	</button>
+</div>
+
+{#if activeTab === 'audit'}
+	<AuditLogView />
+{:else}
+<div class="flex flex-col h-[calc(100vh-8rem)] gap-4">
 	<!-- Header -->
 	<div class="flex items-center justify-between">
 		<div>
@@ -237,15 +269,15 @@
 		</button>
 
 		<button class="btn-sm btn-secondary" onclick={load} title="Refresh now">
-			🔄 Refresh
+			Refresh
 		</button>
 
 		<button class="btn-sm btn-secondary" onclick={copyAll} title="Copy all logs to clipboard">
-			📋 Copy
+			Copy
 		</button>
 
 		<button class="btn-sm btn-secondary" onclick={clearView} title="Clear the view (does not clear buffer)">
-			🗑 Clear
+			Clear
 		</button>
 	</div>
 
@@ -289,8 +321,9 @@
 		{/if}
 	</div>
 </div>
+{/if}
 
-<style>
+<style lang="postcss">
 	.select-sm {
 		@apply bg-surface-0 border border-surface-300 text-zinc-300 rounded-lg px-2 py-1 text-xs;
 		@apply focus:ring-1 focus:ring-brand-500 focus:border-brand-500 outline-none;
@@ -306,11 +339,5 @@
 		@apply inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-medium transition-colors;
 	}
 
-	.btn-primary {
-		@apply bg-brand-600 text-white hover:bg-brand-500;
-	}
 
-	.btn-secondary {
-		@apply bg-surface-200 text-zinc-300 hover:bg-surface-300 border border-surface-300;
-	}
 </style>

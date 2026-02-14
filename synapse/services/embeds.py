@@ -10,17 +10,7 @@ from __future__ import annotations
 
 import discord
 
-from synapse.constants import RARITY_EMOJI
 from synapse.database.models import AchievementTemplate
-
-# Discord-native Color objects for embed sidebar
-RARITY_COLORS: dict[str, discord.Color] = {
-    "common": discord.Color.light_grey(),
-    "uncommon": discord.Color.green(),
-    "rare": discord.Color.blue(),
-    "epic": discord.Color.purple(),
-    "legendary": discord.Color.gold(),
-}
 
 
 def build_level_up_embed(
@@ -50,14 +40,21 @@ def build_achievement_embed(
     tmpl: AchievementTemplate,
 ) -> discord.Embed:
     """Build a rich achievement celebration embed with @mention."""
-    rarity = tmpl.rarity or "common"
-    color = RARITY_COLORS.get(rarity, discord.Color.purple())
-    emoji = RARITY_EMOJI.get(rarity, "\u26aa")
+    # Resolve rarity display from related AchievementRarity row
+    rarity_obj = tmpl.rarity
+    rarity_name = rarity_obj.name if rarity_obj else "achievement"
+    emoji = (rarity_obj.emoji if rarity_obj and rarity_obj.emoji else "\u26aa")
+    color_hex = rarity_obj.color if rarity_obj else "#9b59b6"
+    try:
+        color = discord.Color(int(color_hex.lstrip("#"), 16))
+    except (ValueError, AttributeError):
+        color = discord.Color.purple()
+
     embed = discord.Embed(
         title="\U0001f3c6 Achievement Unlocked!",
         description=(
             f"<@{user_id}> earned "
-            f"{emoji} **{tmpl.name}** ({rarity})\n\n"
+            f"{emoji} **{tmpl.name}** ({rarity_name})\n\n"
             f"*{tmpl.description or 'No description.'}*"
         ),
         color=color,
@@ -69,8 +66,8 @@ def build_achievement_embed(
         if tmpl.gold_reward:
             rewards.append(f"+{tmpl.gold_reward} \U0001fa99 Gold")
         embed.add_field(name="Rewards", value=" | ".join(rewards), inline=False)
-    if tmpl.badge_image_url:
-        embed.set_thumbnail(url=tmpl.badge_image_url)
+    if tmpl.badge_image:
+        embed.set_thumbnail(url=tmpl.badge_image)
     else:
         embed.set_thumbnail(url=avatar_url)
     return embed

@@ -5,7 +5,6 @@ synapse.api.routes.public — Read-only public endpoints
 
 from __future__ import annotations
 
-import json
 from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, Query
@@ -13,14 +12,17 @@ from sqlalchemy import distinct, func, select
 from sqlalchemy.orm import Session
 
 from synapse.api.deps import get_session
-from synapse.constants import RARITY_COLORS_HEX, RARITY_LABELS, xp_for_level
+from synapse.constants import xp_for_level
 from synapse.database.models import (
+    AchievementCategory,
+    AchievementRarity,
     AchievementTemplate,
     ActivityLog,
     Setting,
     User,
     UserAchievement,
 )
+from synapse.services.settings_service import get_setting_value
 
 router = APIRouter(tags=["public"])
 
@@ -51,15 +53,6 @@ def _user_dict(u: User) -> dict:
     }
 
 
-def _setting_val(row: Setting | None, default=None):
-    if row is None:
-        return default
-    try:
-        return json.loads(row.value_json)
-    except (json.JSONDecodeError, TypeError):
-        return row.value_json
-
-
 # ---------------------------------------------------------------------------
 # GET /metrics
 # ---------------------------------------------------------------------------
@@ -68,6 +61,7 @@ def get_metrics(session: Session = Depends(get_session)):
     """Overview metrics for the dashboard hero section."""
     total_users = session.scalar(select(func.count()).select_from(User)) or 0
     total_xp = session.scalar(select(func.coalesce(func.sum(User.xp), 0))) or 0
+    total_gold = session.scalar(select(func.coalesce(func.sum(User.gold), 0))) or 0
 
     week_ago = datetime.now(UTC) - timedelta(days=7)
     active_users = session.scalar(
@@ -86,6 +80,7 @@ def get_metrics(session: Session = Depends(get_session)):
     return {
         "total_users": total_users,
         "total_xp": total_xp,
+        "total_gold": total_gold,
         "active_users_7d": active_users,
         "top_level": top_level,
         "total_achievements_earned": total_achievements_earned,
@@ -211,7 +206,8 @@ def get_achievements(session: Session = Depends(get_session)):
     templates = session.scalars(
         select(AchievementTemplate)
         .where(AchievementTemplate.active.is_(True))
-        .order_by(AchievementTemplate.category, AchievementTemplate.name)
+        .where(AchievementTemplate.is_hidden.is_(False))
+        .order_by(AchievementTemplate.name)
     ).all()
 
     # Count earners per achievement
@@ -226,21 +222,40 @@ def get_achievements(session: Session = Depends(get_session)):
 
     total_users = session.scalar(select(func.count()).select_from(User)) or 1
 
+    # Build category and rarity lookup maps
+    categories = {c.id: c for c in session.scalars(select(AchievementCategory)).all()}
+    rarities = {r.id: r for r in session.scalars(select(AchievementRarity)).all()}
+
     return {
         "achievements": [
             {
                 "id": t.id,
                 "name": t.name,
                 "description": t.description,
-                "category": t.category,
-                "rarity": t.rarity,
-                "rarity_label": RARITY_LABELS.get(t.rarity, t.rarity),
-                "rarity_color": RARITY_COLORS_HEX.get(t.rarity, "#9e9e9e"),
+                "category": (
+                    categories[t.category_id].name
+                    if t.category_id and t.category_id in categories
+                    else None
+                ),
+                "rarity": (
+                    rarities[t.rarity_id].name
+                    if t.rarity_id and t.rarity_id in rarities
+                    else None
+                ),
+                "rarity_color": (
+                    rarities[t.rarity_id].color
+                    if t.rarity_id and t.rarity_id in rarities
+                    else "#9e9e9e"
+                ),
                 "xp_reward": t.xp_reward,
                 "gold_reward": t.gold_reward,
-                "badge_image_url": t.badge_image_url,
+                "badge_image": t.badge_image,
                 "earner_count": earn_counts.get(t.id, 0),
-                "earn_pct": round(earn_counts.get(t.id, 0) / total_users * 100, 1),
+                "earn_pct": round(
+                    earn_counts.get(t.id, 0) / total_users * 100, 1
+                ),
+                "series_id": t.series_id,
+                "series_order": t.series_order,
             }
             for t in templates
         ],
@@ -264,6 +279,9 @@ def get_recent_achievements(
         .limit(limit)
     ).all()
 
+    # Build rarity lookup
+    rarities = {r.id: r for r in session.scalars(select(AchievementRarity)).all()}
+
     return {
         "recent": [
             {
@@ -271,8 +289,16 @@ def get_recent_achievements(
                 "user_name": u.discord_name,
                 "avatar_url": _avatar_url(u.id, u.discord_avatar_hash),
                 "achievement_name": t.name,
-                "achievement_rarity": t.rarity,
-                "rarity_color": RARITY_COLORS_HEX.get(t.rarity, "#9e9e9e"),
+                "achievement_rarity": (
+                    rarities[t.rarity_id].name
+                    if t.rarity_id and t.rarity_id in rarities
+                    else None
+                ),
+                "rarity_color": (
+                    rarities[t.rarity_id].color
+                    if t.rarity_id and t.rarity_id in rarities
+                    else "#9e9e9e"
+                ),
                 "earned_at": ua.earned_at.isoformat() if ua.earned_at else None,
             }
             for ua, t, u in rows
@@ -303,7 +329,7 @@ def get_public_settings(session: Session = Depends(get_session)):
 
     result = {}
     for r in rows:
-        result[r.key] = _setting_val(r)
+        result[r.key] = get_setting_value(session, r.key)
 
     # Defaults
     result.setdefault("dashboard_title", "Synapse Community Dashboard")

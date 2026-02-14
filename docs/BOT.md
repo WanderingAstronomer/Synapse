@@ -188,7 +188,7 @@ Calls `reconcile_counters()` to validate lifetime event counters against raw Eve
 
 1. Sync slash commands (guild-scoped if `DEV_GUILD_ID` set, global otherwise)
 2. Auto-create `#synapse-achievements` channel in the primary guild
-3. Auto-discover guild channels and map to zones by category name
+3. Auto-discover guild channels and map to categories by Discord category name
 4. Audit text channel access for permission issues
 5. Detect AFK voice channels for Event Lake tagging
 6. Start announcement throttle drain task

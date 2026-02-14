@@ -15,6 +15,9 @@ let pendingUserIds = new Set<string>();
 let pendingChannelIds = new Set<string>();
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
 
+/** Maximum IDs per resolution request to prevent oversized POST bodies. */
+const MAX_BATCH_SIZE = 50;
+
 function scheduleFlush() {
 	if (flushTimer) return;
 	flushTimer = setTimeout(flush, 50);
@@ -29,17 +32,37 @@ async function flush() {
 
 	if (uids.length === 0 && cids.length === 0) return;
 
-	try {
-		const res = await api.admin.resolveNames(uids, cids);
-		if (res.users && Object.keys(res.users).length > 0) {
-			userNames.update((m) => ({ ...m, ...res.users }));
+	// Chunk into batches to avoid pathologically large POST bodies
+	// (e.g. audit log pages with hundreds of unique actors)
+	const uidChunks = chunk(uids, MAX_BATCH_SIZE);
+	const cidChunks = chunk(cids, MAX_BATCH_SIZE);
+	const maxChunks = Math.max(uidChunks.length, cidChunks.length);
+
+	for (let i = 0; i < maxChunks; i++) {
+		const ub = uidChunks[i] ?? [];
+		const cb = cidChunks[i] ?? [];
+		if (ub.length === 0 && cb.length === 0) continue;
+		try {
+			const res = await api.admin.resolveNames(ub, cb);
+			if (res.users && Object.keys(res.users).length > 0) {
+				userNames.update((m) => ({ ...m, ...res.users }));
+			}
+			if (res.channels && Object.keys(res.channels).length > 0) {
+				channelNames.update((m) => ({ ...m, ...res.channels }));
+			}
+		} catch {
+			// Resolution is best-effort; don't block the UI
 		}
-		if (res.channels && Object.keys(res.channels).length > 0) {
-			channelNames.update((m) => ({ ...m, ...res.channels }));
-		}
-	} catch {
-		// Resolution is best-effort; don't block the UI
 	}
+}
+
+/** Split an array into chunks of at most `size` elements. */
+function chunk<T>(arr: T[], size: number): T[][] {
+	const result: T[][] = [];
+	for (let i = 0; i < arr.length; i += size) {
+		result.push(arr.slice(i, i + size));
+	}
+	return result;
 }
 
 /**

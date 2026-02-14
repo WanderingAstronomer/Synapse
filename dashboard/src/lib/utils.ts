@@ -1,3 +1,5 @@
+import { CATEGORY_ICONS } from '$lib/constants';
+
 /**
  * Shared utility functions for the Synapse dashboard.
  */
@@ -106,4 +108,13 @@ export const EVENT_COLORS: Record<string, string> = {
 
 export function eventColor(type: string): string {
 	return EVENT_COLORS[type] || '#71717a';
+}
+
+/** Get a relevant icon for a category name */
+export function getCategoryIcon(name: string): string {
+	const lower = name.toLowerCase();
+	for (const [key, icon] of Object.entries(CATEGORY_ICONS)) {
+		if (lower.includes(key)) return icon;
+	}
+	return '';
 }

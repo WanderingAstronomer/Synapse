@@ -19,12 +19,14 @@ from __future__ import annotations
 import json
 import logging
 import time
+from enum import StrEnum
 from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import Engine, select, text
 from sqlalchemy.exc import IntegrityError
 
+from synapse.constants import count_emojis
 from synapse.database.engine import get_session
 from synapse.database.models import EventLake, Setting
 
@@ -34,7 +36,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Event type constants (match 03B_DATA_LAKE.md §3B.4)
 # ---------------------------------------------------------------------------
-class EventType:
+class EventType(StrEnum):
     """Event type string constants for the Event Lake."""
     MESSAGE_CREATE = "message_create"
     REACTION_ADD = "reaction_add"
@@ -62,7 +64,7 @@ def extract_message_metadata(content: str, attachments: int, is_reply: bool,
         "has_code_block": "```" in content,
         "has_link": "http://" in content or "https://" in content,
         "has_attachment": attachments > 0,
-        "emoji_count": content.count(":") // 2,  # rough paired-colon estimate
+        "emoji_count": count_emojis(content),  # improved regex
         "is_reply": is_reply,
         "reply_to_user_id": reply_to_user_id,
     }
@@ -130,7 +132,6 @@ def _update_counters(
     session,
     user_id: int,
     event_type: str,
-    zone_id: int = 0,
     timestamp: datetime | None = None,
 ) -> None:
     """Increment event counters transactionally.
@@ -144,15 +145,14 @@ def _update_counters(
         # Use raw SQL for UPSERT (ON CONFLICT … DO UPDATE) for atomicity
         session.execute(
             text("""
-                INSERT INTO event_counters (user_id, event_type, zone_id, period, count)
-                VALUES (:user_id, :event_type, :zone_id, :period, 1)
-                ON CONFLICT (user_id, event_type, zone_id, period)
+                INSERT INTO event_counters (user_id, event_type, period, count)
+                VALUES (:user_id, :event_type, :period, 1)
+                ON CONFLICT (user_id, event_type, period)
                 DO UPDATE SET count = event_counters.count + 1
             """),
             {
                 "user_id": user_id,
                 "event_type": event_type,
-                "zone_id": zone_id,
                 "period": period,
             },
         )
@@ -209,7 +209,11 @@ class EventLakeWriter:
                 parts = row.key.split(".")
                 if len(parts) == 4:
                     event_type = parts[2]
-                    if val is False or (isinstance(val, str) and val.lower() in ("false", "0", "no")):
+                    is_disabled = val is False or (
+                        isinstance(val, str)
+                        and val.lower() in ("false", "0", "no")
+                    )
+                    if is_disabled:
                         disabled.add(event_type)
 
             self._disabled_sources = disabled
@@ -237,7 +241,6 @@ class EventLakeWriter:
         payload: dict[str, Any] | None = None,
         source_id: str | None = None,
         timestamp: datetime | None = None,
-        zone_id: int = 0,
     ) -> bool:
         """Write a single event to the Event Lake with counter update.
 
@@ -266,7 +269,7 @@ class EventLakeWriter:
             try:
                 session.add(event)
                 session.flush()  # Trigger UNIQUE constraint check before counters
-                _update_counters(session, user_id, event_type, zone_id, ts)
+                _update_counters(session, user_id, event_type, ts)
                 return True
             except IntegrityError:
                 session.rollback()
@@ -291,7 +294,6 @@ class EventLakeWriter:
         attachment_count: int = 0,
         is_reply: bool = False,
         reply_to_user_id: int | None = None,
-        zone_id: int = 0,
     ) -> bool:
         """Write a message_create event with privacy-safe metadata extraction."""
         payload = extract_message_metadata(
@@ -305,7 +307,6 @@ class EventLakeWriter:
             target_id=reply_to_user_id,
             payload=payload,
             source_id=str(message_id),
-            zone_id=zone_id,
         )
 
     def write_reaction_add(

@@ -19,13 +19,14 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
+from synapse.database.seed import DEFAULT_SETTINGS
 from synapse.database.models import (
     Base,
+    CardConfig,
+    Channel,
+    PageLayout,
     Season,
     Setting,
-    Zone,
-    ZoneChannel,
-    ZoneMultiplier,
 )
 from synapse.services.setup_service import (
     BOOTSTRAP_VERSION,
@@ -33,7 +34,6 @@ from synapse.services.setup_service import (
     SETUP_INITIALIZED_KEY,
     ChannelInfo,
     GuildSnapshot,
-    _default_settings,
     bootstrap_guild,
     get_setup_status,
     save_guild_snapshot,
@@ -47,19 +47,14 @@ GUILD_ID = 111222333
 # ---------------------------------------------------------------------------
 @pytest.fixture
 def engine():
-    """Create an in-memory SQLite database with only the tables bootstrap needs.
-
-    We can't call ``Base.metadata.create_all()`` because some models (e.g.
-    ``AdminLog``) use PostgreSQL-specific ``JSONB`` columns that SQLite
-    cannot render.  Instead, create only the tables the setup service touches.
-    """
+    """Create an in-memory SQLite database with only the tables bootstrap needs."""
     eng = create_engine("sqlite:///:memory:")
     tables = [
         Setting.__table__,
-        Zone.__table__,
-        ZoneChannel.__table__,
-        ZoneMultiplier.__table__,
+        Channel.__table__,
         Season.__table__,
+        PageLayout.__table__,
+        CardConfig.__table__,
     ]
     Base.metadata.create_all(eng, tables=tables)
     return eng
@@ -75,12 +70,27 @@ def sample_snapshot() -> GuildSnapshot:
         captured_at=datetime.now(UTC).isoformat(),
         channels=[
             ChannelInfo(id=10, name="General", type="category"),
-            ChannelInfo(id=11, name="general-chat", type="text", category_id=10, category_name="General"),
-            ChannelInfo(id=12, name="bot-commands", type="text", category_id=10, category_name="General"),
+            ChannelInfo(
+                id=11, name="general-chat", type="text",
+                category_id=10, category_name="General",
+            ),
+            ChannelInfo(
+                id=12, name="bot-commands", type="text",
+                category_id=10, category_name="General",
+            ),
             ChannelInfo(id=20, name="Development", type="category"),
-            ChannelInfo(id=21, name="python-help", type="text", category_id=20, category_name="Development"),
-            ChannelInfo(id=22, name="dev-voice", type="voice", category_id=20, category_name="Development"),
-            ChannelInfo(id=23, name="dev-forum", type="forum", category_id=20, category_name="Development"),
+            ChannelInfo(
+                id=21, name="python-help", type="text",
+                category_id=20, category_name="Development",
+            ),
+            ChannelInfo(
+                id=22, name="dev-voice", type="voice",
+                category_id=20, category_name="Development",
+            ),
+            ChannelInfo(
+                id=23, name="dev-forum", type="forum",
+                category_id=20, category_name="Development",
+            ),
             ChannelInfo(id=900, name="AFK", type="voice", category_id=None, category_name=None),
         ],
     )
@@ -176,7 +186,7 @@ class TestGetSetupStatus:
         assert status["initialized"] is False
         assert status["has_guild_snapshot"] is False
         assert status["guild_snapshot"] is None
-        assert status["has_zones"] is False
+        assert status["has_channels"] is False
         assert status["bootstrap_version"] is None
 
     def test_with_snapshot_only(self, engine, sample_snapshot: GuildSnapshot):
@@ -196,7 +206,7 @@ class TestGetSetupStatus:
 
         status = get_setup_status(engine)
         assert status["initialized"] is True
-        assert status["has_zones"] is True
+        assert status["has_channels"] is True
         assert status["bootstrap_version"] == BOOTSTRAP_VERSION
 
 
@@ -204,42 +214,17 @@ class TestGetSetupStatus:
 # bootstrap_guild — happy path
 # ---------------------------------------------------------------------------
 class TestBootstrapGuild:
-    def test_creates_zones_from_categories(self, engine, sample_snapshot: GuildSnapshot):
-        """Bootstrap should create one zone per Discord category."""
+    def test_syncs_channels(self, engine, sample_snapshot: GuildSnapshot):
+        """Bootstrap should sync channels to the channels table."""
         save_guild_snapshot(engine, sample_snapshot)
         result = bootstrap_guild(engine, GUILD_ID)
 
         assert result.success is True
-        assert result.zones_created == 2  # "General" + "Development"
-        assert result.zones_existing == 0
+        assert result.channels_synced > 0
 
         with Session(engine) as session:
-            zones = session.scalars(select(Zone)).all()
-            zone_names = {z.name for z in zones}
-            assert zone_names == {"General", "Development"}
-
-    def test_maps_channels_to_zones(self, engine, sample_snapshot: GuildSnapshot):
-        """Non-category channels should be mapped to their parent zone."""
-        save_guild_snapshot(engine, sample_snapshot)
-        result = bootstrap_guild(engine, GUILD_ID)
-
-        # 8 channels total, 2 are categories → 6 should be mapped
-        assert result.channels_mapped == 6
-        assert result.channels_existing == 0
-
-        with Session(engine) as session:
-            mappings = session.scalars(select(ZoneChannel)).all()
-            assert len(mappings) == 6
-
-    def test_creates_zone_multipliers(self, engine, sample_snapshot: GuildSnapshot):
-        """Each new zone should get default multipliers for all 4 interaction types."""
-        save_guild_snapshot(engine, sample_snapshot)
-        bootstrap_guild(engine, GUILD_ID)
-
-        with Session(engine) as session:
-            mults = session.scalars(select(ZoneMultiplier)).all()
-            # 2 zones × 4 interaction types = 8 multipliers
-            assert len(mults) == 8
+            channels = session.scalars(select(Channel)).all()
+            assert len(channels) > 0
 
     def test_creates_default_season(self, engine, sample_snapshot: GuildSnapshot):
         """Bootstrap should create Season 1 if none exists."""
@@ -254,22 +239,26 @@ class TestBootstrapGuild:
             assert season.name == "Season 1"
             assert season.active is True
 
-    def test_writes_default_settings(self, engine, sample_snapshot: GuildSnapshot):
-        """Bootstrap should write all baseline settings."""
+    def test_does_not_write_settings(self, engine, sample_snapshot: GuildSnapshot):
+        """Bootstrap no longer seeds settings — init_db() handles that."""
         save_guild_snapshot(engine, sample_snapshot)
         result = bootstrap_guild(engine, GUILD_ID)
 
-        expected = len(_default_settings())
-        # +3 for setup.initialized, bootstrap_version, bootstrap_timestamp
-        # +1 for guild.snapshot (written by save_guild_snapshot)
-        assert result.settings_written == expected
+        # Settings seeding was moved to init_db(); bootstrap writes 0 settings
+        assert result.settings_written == 0
+
+    def test_settings_seeded_by_init_db(self, engine):
+        """DEFAULT_SETTINGS from seed.py should contain all baseline keys."""
+        from synapse.database.seed import seed_default_settings
+
+        seed_default_settings(engine)
 
         with Session(engine) as session:
             all_settings = session.scalars(select(Setting)).all()
             keys = {s.key for s in all_settings}
             assert "economy.xp_per_message" in keys
             assert "anti_gaming.min_message_length" in keys
-            assert SETUP_INITIALIZED_KEY in keys
+            assert len(keys) == len(DEFAULT_SETTINGS)
 
     def test_marks_initialized(self, engine, sample_snapshot: GuildSnapshot):
         """After bootstrap, setup.initialized should be True."""
@@ -292,40 +281,38 @@ class TestBootstrapEdgeCases:
 
         assert result.success is False
         assert any("No guild snapshot" in w for w in result.warnings)
-        assert result.zones_created == 0
 
-    def test_sparse_guild_creates_fallback_zone(self, engine, sparse_snapshot: GuildSnapshot):
-        """Guild with no categories should get a 'General' fallback zone."""
+    def test_sparse_guild_syncs_channels(self, engine, sparse_snapshot: GuildSnapshot):
+        """Guild with no categories should still sync channels."""
         save_guild_snapshot(engine, sparse_snapshot)
         result = bootstrap_guild(engine, GUILD_ID)
 
         assert result.success is True
-        assert result.zones_created == 1
-        assert any("no categories" in w for w in result.warnings)
+        assert result.channels_synced > 0
 
-        with Session(engine) as session:
-            zone = session.scalar(select(Zone).where(Zone.guild_id == GUILD_ID))
-            assert zone.name == "General"
-
-    def test_sparse_guild_maps_channels_to_fallback(self, engine, sparse_snapshot: GuildSnapshot):
-        """Loose channels should map to the General fallback zone."""
-        save_guild_snapshot(engine, sparse_snapshot)
-        result = bootstrap_guild(engine, GUILD_ID)
-
-        assert result.channels_mapped == 2
-
-        with Session(engine) as session:
-            mappings = session.scalars(select(ZoneChannel)).all()
-            assert len(mappings) == 2
-
-    def test_guild_id_mismatch_produces_warning(self, engine, sample_snapshot: GuildSnapshot):
-        """If config guild_id doesn't match snapshot, bootstrap should warn but continue."""
+    def test_guild_id_mismatch_fails_closed_by_default(
+        self, engine, sample_snapshot: GuildSnapshot,
+    ):
+        """If config guild_id differs from snapshot, bootstrap should fail by default."""
         save_guild_snapshot(engine, sample_snapshot)
         different_guild = 999888777
         result = bootstrap_guild(engine, different_guild)
 
-        assert result.success is True
+        assert result.success is False
         assert any("differs from config" in w for w in result.warnings)
+
+    def test_guild_id_mismatch_can_be_overridden(self, engine, sample_snapshot: GuildSnapshot):
+        """Mismatch can be explicitly overridden via allow_guild_mismatch."""
+        save_guild_snapshot(engine, sample_snapshot)
+        different_guild = 999888777
+        result = bootstrap_guild(
+            engine,
+            different_guild,
+            allow_guild_mismatch=True,
+        )
+
+        assert result.success is True
+        assert any("Proceeding due to allow_guild_mismatch=true" in w for w in result.warnings)
 
     def test_corrupt_snapshot_returns_failure(self, engine):
         """Corrupt JSON in the snapshot setting should fail gracefully."""
@@ -347,61 +334,45 @@ class TestBootstrapEdgeCases:
 # ---------------------------------------------------------------------------
 class TestBootstrapIdempotency:
     def test_second_run_creates_no_duplicates(self, engine, sample_snapshot: GuildSnapshot):
-        """Running bootstrap twice should not duplicate zones or channels."""
+        """Running bootstrap twice should not duplicate channels."""
         save_guild_snapshot(engine, sample_snapshot)
 
         result1 = bootstrap_guild(engine, GUILD_ID)
-        assert result1.zones_created == 2
-        assert result1.channels_mapped == 6
-        assert result1.season_created is True
-
         result2 = bootstrap_guild(engine, GUILD_ID)
-        assert result2.zones_created == 0
-        assert result2.zones_existing == 2
-        assert result2.channels_mapped == 0
-        assert result2.channels_existing == 6
+
         assert result2.season_created is False
+        # Channel sync is upsert-based, so count should be stable
+        with Session(engine) as session:
+            channels = session.scalars(select(Channel)).all()
+            assert len(channels) == result1.channels_synced
 
     def test_idempotent_settings(self, engine, sample_snapshot: GuildSnapshot):
-        """Second run should not re-write settings that already exist."""
+        """Bootstrap should never write settings (handled by init_db)."""
         save_guild_snapshot(engine, sample_snapshot)
 
         result1 = bootstrap_guild(engine, GUILD_ID)
         result2 = bootstrap_guild(engine, GUILD_ID)
 
+        assert result1.settings_written == 0
         assert result2.settings_written == 0
-
-    def test_zone_count_stable_after_rerun(self, engine, sample_snapshot: GuildSnapshot):
-        """Total zone count shouldn't change across multiple runs."""
-        save_guild_snapshot(engine, sample_snapshot)
-
-        bootstrap_guild(engine, GUILD_ID)
-        bootstrap_guild(engine, GUILD_ID)
-        bootstrap_guild(engine, GUILD_ID)
-
-        with Session(engine) as session:
-            zones = session.scalars(
-                select(Zone).where(Zone.guild_id == GUILD_ID)
-            ).all()
-            assert len(zones) == 2
 
 
 # ---------------------------------------------------------------------------
-# _default_settings sanity
+# DEFAULT_SETTINGS sanity
 # ---------------------------------------------------------------------------
 class TestDefaultSettings:
     def test_all_keys_have_three_tuple(self):
         """Every default setting should be a (value, category, description) tuple."""
-        for key, val in _default_settings().items():
+        for key, val in DEFAULT_SETTINGS.items():
             assert isinstance(val, tuple), f"{key} is not a tuple"
             assert len(val) == 3, f"{key} tuple length is {len(val)}, expected 3"
 
     def test_categories_are_known(self):
         """Setting categories should be from a known set."""
         known = {"economy", "anti_gaming", "quality", "announcements", "display"}
-        for key, (_, category, _) in _default_settings().items():
+        for key, (_, category, _) in DEFAULT_SETTINGS.items():
             assert category in known, f"{key} has unknown category '{category}'"
 
     def test_minimum_setting_count(self):
-        """We should have at least 15 default settings (currently 16)."""
-        assert len(_default_settings()) >= 15
+        """We should have at least 15 default settings (currently 24)."""
+        assert len(DEFAULT_SETTINGS) >= 15

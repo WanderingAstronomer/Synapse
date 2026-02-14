@@ -8,7 +8,7 @@
 	}
 
 	let {
-		icon = '🔍',
+		icon = '',
 		title = 'Nothing here yet',
 		description = 'Data will appear once there is activity.',
 		action = null,
@@ -23,7 +23,7 @@
 			<div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 rounded-full bg-brand-500 blur-3xl"></div>
 		</div>
 		<div class="relative z-10">
-			<span class="text-6xl mb-6 block animate-float">{icon}</span>
+			{#if icon}<span class="text-6xl mb-6 block animate-float">{icon}</span>{/if}
 			<h3 class="text-xl font-bold text-white mb-2">{title}</h3>
 			<p class="text-sm text-zinc-400 max-w-lg mx-auto mb-6">{description}</p>
 			{#if action}
@@ -35,9 +35,11 @@
 	</div>
 {:else}
 	<div class="flex flex-col items-center justify-center py-16 text-center animate-fade-in">
+		{#if icon}
 		<div class="w-20 h-20 rounded-2xl bg-surface-200 border border-surface-300 flex items-center justify-center mb-4">
 			<span class="text-4xl">{icon}</span>
 		</div>
+		{/if}
 		<h3 class="text-lg font-semibold text-zinc-300">{title}</h3>
 		<p class="text-sm text-zinc-500 mt-1 max-w-md">{description}</p>
 		{#if action}

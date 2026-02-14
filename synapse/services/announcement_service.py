@@ -15,8 +15,7 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING
 
-import discord.abc
-from discord.abc import Messageable
+from discord.abc import Messageable, Snowflake
 
 from synapse.database.engine import run_db
 from synapse.database.models import AchievementTemplate, UserPreferences
@@ -53,14 +52,14 @@ def stop_queue() -> None:
 # Helpers (sync — run via run_db)
 # ---------------------------------------------------------------------------
 def _load_preferences(engine, user_id: int) -> UserPreferences | None:
-    from synapse.database.engine import get_session
+    from synapse.database.engine import get_session  # noqa: E402 — avoid circular
 
     with get_session(engine) as session:
         return session.get(UserPreferences, user_id)
 
 
 def _load_achievement_template(engine, ach_id: int) -> AchievementTemplate | None:
-    from synapse.database.engine import get_session
+    from synapse.database.engine import get_session  # noqa: E402 — avoid circular
 
     with get_session(engine) as session:
         tmpl = session.get(AchievementTemplate, ach_id)
@@ -76,7 +75,7 @@ def resolve_announce_channel(
     bot: SynapseBot,
     *,
     achievement_template: AchievementTemplate | None = None,
-    fallback_channel: discord.abc.Snowflake | Messageable | None = None,
+    fallback_channel: Snowflake | Messageable | None = None,
 ) -> Messageable | None:
     """Resolve the target channel for an announcement.
 
@@ -133,7 +132,7 @@ async def announce_rewards(
     user_id: int,
     display_name: str,
     avatar_url: str,
-    fallback_channel: discord.abc.Snowflake | Messageable | None = None,
+    fallback_channel: Snowflake | Messageable | None = None,
 ) -> None:
     """Announce level-ups and achievements from a process_event result."""
     if not result.leveled_up and not result.achievements_earned:
@@ -194,7 +193,7 @@ async def announce_manual_award(
     gold: int,
     reason: str,
     admin_name: str,
-    fallback_channel: discord.abc.Snowflake | Messageable | None = None,
+    fallback_channel: Snowflake | Messageable | None = None,
 ) -> None:
     """Announce a manual XP/Gold award (from /award command)."""
     prefs: UserPreferences | None = await run_db(
@@ -219,7 +218,7 @@ async def announce_achievement_grant(
     avatar_url: str,
     achievement_id: int,
     admin_name: str,
-    fallback_channel: discord.abc.Snowflake | Messageable | None = None,
+    fallback_channel: Snowflake | Messageable | None = None,
 ) -> None:
     """Announce a manually granted achievement (from /grant-achievement)."""
     prefs: UserPreferences | None = await run_db(

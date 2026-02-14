@@ -17,6 +17,19 @@ from synapse.engine.events import SynapseEvent
 if TYPE_CHECKING:
     from synapse.engine.cache import ConfigCache
 
+# ---------------------------------------------------------------------------
+# Default quality thresholds (single source of truth)
+# ---------------------------------------------------------------------------
+_LONG_MSG_CHARS = 500
+_LONG_MSG_BONUS = 1.5
+_MEDIUM_MSG_CHARS = 200
+_MEDIUM_MSG_BONUS = 1.2
+_CODE_BLOCK_BONUS = 1.4
+_LINK_BONUS = 1.25
+_ATTACHMENT_BONUS = 1.1
+_EMOJI_SPAM_THRESHOLD = 5
+_EMOJI_SPAM_PENALTY = 0.5
+
 
 def calculate_quality_modifier(
     event: SynapseEvent,
@@ -34,24 +47,16 @@ def calculate_quality_modifier(
     modifier = 1.0
     length = m.get("length", 0)
 
-    # Read thresholds from settings (fall back to defaults)
-    if cache is not None:
-        long_threshold = cache.get_int("quality_long_message_chars", 500)
-        long_bonus = cache.get_float("quality_long_message_bonus", 1.5)
-        medium_threshold = cache.get_int("quality_medium_message_chars", 200)
-        medium_bonus = cache.get_float("quality_medium_message_bonus", 1.2)
-        code_bonus = cache.get_float("quality_code_block_bonus", 1.4)
-        link_bonus = cache.get_float("quality_link_bonus", 1.25)
-        attachment_bonus = cache.get_float("quality_attachment_bonus", 1.1)
-        emoji_threshold = cache.get_int("quality_emoji_spam_threshold", 5)
-        emoji_penalty = cache.get_float("quality_emoji_spam_penalty", 0.5)
-    else:
-        long_threshold, long_bonus = 500, 1.5
-        medium_threshold, medium_bonus = 200, 1.2
-        code_bonus = 1.4
-        link_bonus = 1.25
-        attachment_bonus = 1.1
-        emoji_threshold, emoji_penalty = 5, 0.5
+    # Read thresholds from settings (fall back to module-level defaults)
+    long_threshold = cache.get_int("quality_long_message_chars", _LONG_MSG_CHARS) if cache else _LONG_MSG_CHARS
+    long_bonus = cache.get_float("quality_long_message_bonus", _LONG_MSG_BONUS) if cache else _LONG_MSG_BONUS
+    medium_threshold = cache.get_int("quality_medium_message_chars", _MEDIUM_MSG_CHARS) if cache else _MEDIUM_MSG_CHARS
+    medium_bonus = cache.get_float("quality_medium_message_bonus", _MEDIUM_MSG_BONUS) if cache else _MEDIUM_MSG_BONUS
+    code_bonus = cache.get_float("quality_code_block_bonus", _CODE_BLOCK_BONUS) if cache else _CODE_BLOCK_BONUS
+    link_bonus = cache.get_float("quality_link_bonus", _LINK_BONUS) if cache else _LINK_BONUS
+    attachment_bonus = cache.get_float("quality_attachment_bonus", _ATTACHMENT_BONUS) if cache else _ATTACHMENT_BONUS
+    emoji_threshold = cache.get_int("quality_emoji_spam_threshold", _EMOJI_SPAM_THRESHOLD) if cache else _EMOJI_SPAM_THRESHOLD
+    emoji_penalty = cache.get_float("quality_emoji_spam_penalty", _EMOJI_SPAM_PENALTY) if cache else _EMOJI_SPAM_PENALTY
 
     # Length bonus (mutually exclusive tiers)
     if length > long_threshold:
@@ -77,11 +82,3 @@ def calculate_quality_modifier(
 
     # Floor to prevent zero-XP
     return max(modifier, 0.1)
-
-
-def llm_quality_modifier(event: SynapseEvent) -> float:
-    """Placeholder for LLM quality assessment (§5.9 — DEFERRED per D05-02).
-
-    Currently always returns 1.0 (no effect).
-    """
-    return 1.0

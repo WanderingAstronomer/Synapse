@@ -4,8 +4,8 @@ synapse.services.setup_service — First-Run Bootstrap & Guild Discovery
 
 Replaces the legacy ``seed.py`` YAML-based initialization.  Instead of
 reading fixture files, this service reads a **live guild snapshot** from
-the database (written by the bot on ``on_ready``) and generates zones,
-channel mappings, a default season, and baseline settings.
+the database (written by the bot on ``on_ready``) and syncs channels,
+creates a default season, and seeds baseline settings.
 
 Key design choices (see D-IMPL-08 through D-IMPL-11):
 
@@ -15,8 +15,8 @@ Key design choices (see D-IMPL-08 through D-IMPL-11):
   ``guild.snapshot``.  The bot writes it every time it connects;
   the API reads it when the admin triggers bootstrap.
 - **Idempotent re-runs** — calling ``bootstrap_guild()`` twice produces
-  the same result.  Zones are upserted by name; channels are upserted
-  by Discord snowflake; settings are insert-if-missing.
+  the same result.  Channels are upserted by Discord snowflake;
+  settings are insert-if-missing.
 """
 
 from __future__ import annotations
@@ -30,22 +30,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from synapse.database.models import (
+    Channel,
     Season,
     Setting,
-    Zone,
-    ZoneChannel,
-    ZoneMultiplier,
 )
+from synapse.services.channel_service import sync_channels_from_snapshot
+from synapse.services.layout_service import seed_default_layouts
 
 logger = logging.getLogger(__name__)
-
-# Default multipliers for auto-created zones
-_DEFAULT_MULTIPLIERS: dict[str, tuple[float, float]] = {
-    "MESSAGE": (1.0, 1.0),
-    "REACTION_RECEIVED": (1.0, 1.0),
-    "VOICE_MINUTE": (1.0, 1.0),
-    "THREAD_CREATE": (1.0, 1.0),
-}
 
 # Keys used in the Setting table for setup state
 SETUP_INITIALIZED_KEY = "setup.initialized"
@@ -123,10 +115,7 @@ class GuildSnapshot:
 class BootstrapResult:
     """Structured result from a bootstrap run."""
     success: bool = True
-    zones_created: int = 0
-    zones_existing: int = 0
-    channels_mapped: int = 0
-    channels_existing: int = 0
+    channels_synced: int = 0
     season_created: bool = False
     settings_written: int = 0
     warnings: list[str] = field(default_factory=list)
@@ -157,7 +146,7 @@ def get_setup_status(engine) -> dict:
             except (json.JSONDecodeError, KeyError):
                 has_snapshot = False
 
-        zone_count = session.scalar(select(Zone.id).limit(1)) is not None
+        channel_count = session.scalar(select(Channel.id).limit(1)) is not None
 
         return {
             "initialized": initialized,
@@ -165,7 +154,7 @@ def get_setup_status(engine) -> dict:
             "bootstrap_timestamp": timestamp,
             "has_guild_snapshot": has_snapshot,
             "guild_snapshot": snapshot_info,
-            "has_zones": zone_count,
+            "has_channels": channel_count,
         }
 
 
@@ -219,8 +208,13 @@ def get_bot_heartbeat(engine) -> dict:
 # ---------------------------------------------------------------------------
 # Bootstrap logic
 # ---------------------------------------------------------------------------
-def bootstrap_guild(engine, guild_id: int) -> BootstrapResult:
-    """Run first-run guild bootstrap: create zones, map channels, create season.
+def bootstrap_guild(
+    engine,
+    guild_id: int,
+    *,
+    allow_guild_mismatch: bool = False,
+) -> BootstrapResult:
+    """Run first-run guild bootstrap: sync channels, create season, seed settings.
 
     Reads the guild snapshot from the Setting table (written by the bot
     on ``on_ready``).  If no snapshot exists, returns a warning.
@@ -248,92 +242,34 @@ def bootstrap_guild(engine, guild_id: int) -> BootstrapResult:
             return result
 
         if snapshot.guild_id != guild_id:
+            if not allow_guild_mismatch:
+                result.success = False
+                result.warnings.append(
+                    f"Snapshot guild ({snapshot.guild_id}) differs from config guild "
+                    f"({guild_id}).  Re-run with allow_guild_mismatch=true to override."
+                )
+                return result
             result.warnings.append(
                 f"Snapshot guild ({snapshot.guild_id}) differs from config guild "
-                f"({guild_id}).  Using snapshot data anyway."
+                f"({guild_id}).  Proceeding due to allow_guild_mismatch=true."
             )
 
         # ------------------------------------------------------------------
-        # Step 1: Create zones from Discord categories
+        # Step 1: Sync channel metadata to 'channels' table
         # ------------------------------------------------------------------
-        categories: dict[str, int] = {}  # name -> category snowflake
-        for ch in snapshot.channels:
-            if ch.type == "category":
-                categories[ch.name] = ch.id
-
-        # If guild has no categories, create a single "General" zone
-        if not categories:
-            categories["General"] = 0
-            result.warnings.append(
-                "Guild has no categories — created a single 'General' zone."
-            )
-
-        existing_zones = {
-            z.name.lower(): z
-            for z in session.scalars(
-                select(Zone).where(Zone.guild_id == guild_id)
-            ).all()
-        }
-
-        zone_by_name: dict[str, Zone] = {}
-        for cat_name in categories:
-            lower = cat_name.lower()
-            if lower in existing_zones:
-                zone_by_name[cat_name] = existing_zones[lower]
-                result.zones_existing += 1
-            else:
-                zone = Zone(
-                    guild_id=guild_id,
-                    name=cat_name,
-                    description=f"Auto-created from Discord category '{cat_name}'",
-                )
-                session.add(zone)
-                session.flush()  # get zone.id
-
-                # Add default multipliers
-                for itype, (xp_m, star_m) in _DEFAULT_MULTIPLIERS.items():
-                    session.add(ZoneMultiplier(
-                        zone_id=zone.id,
-                        interaction_type=itype,
-                        xp_multiplier=xp_m,
-                        star_multiplier=star_m,
-                    ))
-
-                zone_by_name[cat_name] = zone
-                result.zones_created += 1
-                logger.info("Created zone '%s' (id=%d)", cat_name, zone.id)
-
-        # ------------------------------------------------------------------
-        # Step 2: Map channels to zones by category membership
-        # ------------------------------------------------------------------
-        existing_channel_ids: set[int] = {
-            row
-            for row in session.scalars(select(ZoneChannel.channel_id)).all()
-        }
-
-        # Build a fallback zone (first zone or "General")
-        fallback_zone = zone_by_name.get("General") or next(iter(zone_by_name.values()), None)
-
-        for ch in snapshot.channels:
-            if ch.type == "category":
-                continue  # Don't map category channels themselves
-            if ch.id in existing_channel_ids:
-                result.channels_existing += 1
-                continue
-
-            # Find zone by category name
-            target_zone = None
-            if ch.category_name and ch.category_name in zone_by_name:
-                target_zone = zone_by_name[ch.category_name]
-            elif fallback_zone:
-                target_zone = fallback_zone
-
-            if target_zone:
-                session.add(ZoneChannel(
-                    zone_id=target_zone.id,
-                    channel_id=ch.id,
-                ))
-                result.channels_mapped += 1
+        ch_dicts = [
+            {
+                "id": ch.id,
+                "name": ch.name,
+                "type": ch.type,
+                "category_id": ch.category_id,
+                "category_name": ch.category_name,
+                "position": 0,
+            }
+            for ch in snapshot.channels
+        ]
+        sync_result = sync_channels_from_snapshot(engine, guild_id, ch_dicts)
+        result.channels_synced = sync_result["upserted"]
 
         # ------------------------------------------------------------------
         # Step 3: Ensure a default season exists
@@ -357,13 +293,13 @@ def bootstrap_guild(engine, guild_id: int) -> BootstrapResult:
             logger.info("Created default season for guild %d", guild_id)
 
         # ------------------------------------------------------------------
-        # Step 4: Write default settings
+        # Step 4: Seed default page layouts and cards
         # ------------------------------------------------------------------
-        defaults = _default_settings()
-        for key, (value, category, desc) in defaults.items():
-            if not _setting_exists(session, key):
-                _upsert_setting(session, key, json.dumps(value), category, desc)
-                result.settings_written += 1
+        # Note: default *settings* (economy, quality, display, etc.) are now
+        # seeded by init_db() in engine.py so they're available from the very
+        # first bot startup — no bootstrap required.
+        seed_default_layouts(session, guild_id)
+        logger.info("Seeded default page layouts for guild %d", guild_id)
 
         # ------------------------------------------------------------------
         # Step 5: Mark setup as initialized
@@ -385,8 +321,8 @@ def bootstrap_guild(engine, guild_id: int) -> BootstrapResult:
         session.commit()
 
     logger.info(
-        "Bootstrap complete: %d zones created, %d channels mapped, season=%s",
-        result.zones_created, result.channels_mapped, result.season_created,
+        "Bootstrap complete: %d channels synced, season=%s",
+        result.channels_synced, result.season_created,
     )
     return result
 
@@ -411,10 +347,6 @@ def _get_raw_setting(session: Session, key: str) -> str | None:
     return row.value_json if row else None
 
 
-def _setting_exists(session: Session, key: str) -> bool:
-    return session.get(Setting, key) is not None
-
-
 def _upsert_setting(
     session: Session,
     key: str,
@@ -436,26 +368,3 @@ def _upsert_setting(
             description=description,
         ))
 
-
-def _default_settings() -> dict[str, tuple]:
-    """Return default settings as {key: (value, category, description)}."""
-    return {
-        "economy.xp_per_message": (5, "economy", "Base XP awarded per message"),
-        "economy.xp_per_reaction": (2, "economy", "Base XP awarded per reaction received"),
-        "economy.xp_per_voice_minute": (1, "economy", "Base XP per voice minute"),
-        "economy.gold_per_message": (1, "economy", "Base gold per message"),
-        "economy.message_cooldown_seconds": (60, "anti_gaming", "Min seconds between XP-earning messages"),
-        "economy.daily_xp_cap": (500, "anti_gaming", "Max XP a user can earn per day"),
-        "economy.daily_gold_cap": (100, "anti_gaming", "Max gold a user can earn per day"),
-        "anti_gaming.min_message_length": (5, "anti_gaming", "Minimum message length for XP"),
-        "anti_gaming.unique_reactor_threshold": (3, "anti_gaming", "Unique reactors needed for full value"),
-        "anti_gaming.diminishing_returns_after": (50, "anti_gaming", "Messages after which diminishing returns kick in"),
-        "quality.code_block_bonus": (1.5, "quality", "Multiplier for messages with code blocks"),
-        "quality.link_bonus": (1.2, "quality", "Multiplier for messages with links"),
-        "quality.long_message_threshold": (200, "quality", "Character count for long-message bonus"),
-        "quality.long_message_bonus": (1.3, "quality", "Multiplier for long messages"),
-        "announcements.achievement_channel_enabled": (True, "announcements", "Post level-ups and achievements"),
-        "announcements.leaderboard_public": (True, "display", "Show public leaderboard page"),
-        "economy.primary_currency_name": ("XP", "economy", "Display name for primary currency (e.g. XP, Honor, Karma)"),
-        "economy.secondary_currency_name": ("Gold", "economy", "Display name for secondary currency (e.g. Gold, Loot, Credits)"),
-    }

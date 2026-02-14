@@ -17,10 +17,14 @@ the event loop.
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
 from discord.ext import commands, tasks
 
 from synapse.database.engine import run_db
+
+if TYPE_CHECKING:
+    from synapse.bot.core import SynapseBot
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +32,7 @@ logger = logging.getLogger(__name__)
 class PeriodicTasks(commands.Cog):
     """Cog for scheduled background maintenance tasks."""
 
-    def __init__(self, bot: commands.Bot) -> None:
+    def __init__(self, bot: SynapseBot) -> None:
         self.bot = bot
 
     async def cog_load(self) -> None:
@@ -54,7 +58,7 @@ class PeriodicTasks(commands.Cog):
         try:
             await run_db(save_bot_heartbeat, self.bot.engine)
         except Exception:
-            logger.exception("Heartbeat write failed")
+            logger.exception("Heartbeat write failed", extra={"task": "heartbeat"})
 
     @heartbeat_loop.before_loop
     async def _wait_heartbeat(self):
@@ -80,7 +84,7 @@ class PeriodicTasks(commands.Cog):
                 result["events_deleted"], result["counters_deleted"],
             )
         except Exception:
-            logger.exception("Retention task failed")
+            logger.exception("Retention task failed", extra={"task": "retention"})
 
     @retention_loop.before_loop
     async def _wait_retention(self):
@@ -101,12 +105,12 @@ class PeriodicTasks(commands.Cog):
                 result["checked"], result["corrected"],
             )
         except Exception:
-            logger.exception("Reconciliation task failed")
+            logger.exception("Reconciliation task failed", extra={"task": "reconciliation"})
 
     @reconciliation_loop.before_loop
     async def _wait_reconciliation(self):
         await self.bot.wait_until_ready()
 
 
-async def setup(bot: commands.Bot) -> None:
+async def setup(bot: SynapseBot) -> None:
     await bot.add_cog(PeriodicTasks(bot))

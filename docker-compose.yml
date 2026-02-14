@@ -59,7 +59,7 @@ services:
       db:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "python -c 'import synapse.bot' 2>/dev/null || exit 1"]
+      test: ["CMD-SHELL", "kill -0 $(cat /tmp/synapse_bot.pid 2>/dev/null) 2>/dev/null || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -91,7 +91,7 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: postgresql+psycopg2://synapse:synapse@db:5432/synapse
-      JWT_SECRET: ${JWT_SECRET:-synapse-dev-secret-change-me}
+      JWT_SECRET: ${JWT_SECRET}
       DISCORD_REDIRECT_URI: http://localhost:3000/auth/callback
       FRONTEND_URL: http://localhost:3000
     ports:

@@ -1,30 +1,17 @@
 <script lang="ts">
-	import { flash } from '$lib/stores/flash';
+	import { flash } from '$lib/stores/flash.svelte';
 	import { fly } from 'svelte/transition';
-
-	const TYPE_STYLES = {
-		success: 'bg-green-500/10 border-green-500/30 text-green-400',
-		error:   'bg-red-500/10 border-red-500/30 text-red-400',
-		info:    'bg-blue-500/10 border-blue-500/30 text-blue-400',
-		warning: 'bg-amber-500/10 border-amber-500/30 text-amber-400',
-	};
-
-	const TYPE_ICONS = {
-		success: '✓',
-		error:   '✕',
-		info:    'ℹ',
-		warning: '⚠',
-	};
+	import { FLASH_CONFIG } from '$lib/constants';
 </script>
 
-{#if $flash.length > 0}
+{#if flash.messages.length > 0}
 	<div class="fixed top-4 right-4 z-50 space-y-2 max-w-sm">
-		{#each $flash as msg (msg.id)}
+		{#each flash.messages as msg (msg.id)}
 			<div
-				class="flex items-start gap-3 px-4 py-3 rounded-lg border {TYPE_STYLES[msg.type]} shadow-xl backdrop-blur"
+				class="flex items-start gap-3 px-4 py-3 rounded-lg border {FLASH_CONFIG[msg.type]?.styles || ''} shadow-xl backdrop-blur"
 				transition:fly={{ x: 100, duration: 200 }}
 			>
-				<span class="text-lg font-bold leading-none mt-0.5">{TYPE_ICONS[msg.type]}</span>
+				<span class="text-lg font-bold leading-none mt-0.5">{FLASH_CONFIG[msg.type]?.icon || 'ℹ'}</span>
 				<p class="text-sm flex-1">{msg.message}</p>
 				<button
 					class="text-zinc-500 hover:text-zinc-300 text-lg leading-none"

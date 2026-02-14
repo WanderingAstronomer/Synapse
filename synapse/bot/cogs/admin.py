@@ -24,6 +24,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from synapse.database.engine import run_db
+from synapse.database.models import TriggerType
 from synapse.services.admin_service import create_achievement, create_season
 from synapse.services.announcement_service import (
     announce_achievement_grant,
@@ -136,17 +137,8 @@ class Admin(commands.Cog, name="Admin"):
     )
     @app_commands.choices(
         requirement_type=[
-            app_commands.Choice(name="Counter Threshold", value="counter_threshold"),
-            app_commands.Choice(name="Star Threshold", value="star_threshold"),
-            app_commands.Choice(name="XP Milestone", value="xp_milestone"),
-            app_commands.Choice(name="Custom", value="custom"),
-        ],
-        rarity=[
-            app_commands.Choice(name="Common", value="common"),
-            app_commands.Choice(name="Uncommon", value="uncommon"),
-            app_commands.Choice(name="Rare", value="rare"),
-            app_commands.Choice(name="Epic", value="epic"),
-            app_commands.Choice(name="Legendary", value="legendary"),
+            app_commands.Choice(name=t.value.replace("_", " ").title(), value=t.value)
+            for t in TriggerType
         ],
     )
     @is_admin()
@@ -187,6 +179,20 @@ class Admin(commands.Cog, name="Admin"):
         embed.add_field(name="Rarity", value=tmpl.rarity, inline=True)
         embed.add_field(name="XP Reward", value=str(tmpl.xp_reward), inline=True)
         await interaction.response.send_message(embed=embed)
+
+    @create_ach.autocomplete("rarity")
+    async def _rarity_autocomplete(
+        self, interaction: discord.Interaction, current: str,
+    ) -> list[app_commands.Choice[str]]:
+        """Dynamic rarity autocomplete from per-guild DB config."""
+        guild_id = interaction.guild_id or 0
+        rarities = self.bot.cache.get_achievement_rarities(guild_id)
+        choices = [
+            app_commands.Choice(name=r.name.title(), value=r.name)
+            for r in rarities
+            if current.lower() in r.name.lower()
+        ]
+        return choices[:25]  # Discord caps at 25
 
     # -------------------------------------------------------------------
     # /grant-achievement

@@ -25,10 +25,9 @@ from synapse.database.models import (
     Season,
     User,
     UserAchievement,
-    UserPreferences,
     UserStats,
 )
-from synapse.engine.achievements import EVENT_TO_STAT, check_achievements
+from synapse.engine.achievements import EVENT_TO_STAT, AchievementContext, check_achievements
 from synapse.engine.events import SynapseEvent
 from synapse.engine.reward import RewardResult, calculate_reward
 
@@ -69,11 +68,6 @@ def get_or_create_stats(session: Session, user_id: int, season_id: int) -> UserS
     return stats
 
 
-def get_user_preferences(session: Session, user_id: int) -> UserPreferences | None:
-    """Get user preferences, or None if not set (defaults apply)."""
-    return session.get(UserPreferences, user_id)
-
-
 def get_earned_achievement_ids(session: Session, user_id: int) -> set[int]:
     """Get set of achievement template IDs the user has already earned."""
     rows = session.scalars(
@@ -82,6 +76,24 @@ def get_earned_achievement_ids(session: Session, user_id: int) -> set[int]:
         )
     ).all()
     return set(rows)
+
+
+def _get_event_counts(session: Session, user_id: int) -> dict[str, int]:
+    """Build a mapping of event_type → total count from activity_log.
+
+    Used by event_count and first_event achievement triggers.
+    """
+    from sqlalchemy import func as sa_func
+
+    rows = session.execute(
+        select(
+            ActivityLog.event_type,
+            sa_func.count().label("cnt"),
+        )
+        .where(ActivityLog.user_id == user_id)
+        .group_by(ActivityLog.event_type)
+    ).all()
+    return {row.event_type: row.cnt for row in rows}
 
 
 def process_event(
@@ -125,7 +137,6 @@ def process_event(
                 user_id=event.user_id,
                 event_type=event.event_type.value,
                 season_id=season_id,
-                zone_id=_resolve_zone_id(event, cache),
                 source_system="discord",
                 source_event_id=event.source_event_id,
                 xp_delta=result.xp,
@@ -148,7 +159,6 @@ def process_event(
                 user_id=event.user_id,
                 event_type=event.event_type.value,
                 season_id=season_id,
-                zone_id=_resolve_zone_id(event, cache),
                 source_system="discord",
                 source_event_id=None,
                 xp_delta=result.xp,
@@ -159,6 +169,7 @@ def process_event(
             session.add(log)
 
         # Update user XP, level, gold
+        old_level = user.level
         user.xp += result.xp
         if result.leveled_up and result.new_level is not None:
             user.level = result.new_level
@@ -169,11 +180,10 @@ def process_event(
                 user_id=user.id,
                 event_type=InteractionType.LEVEL_UP.value,
                 season_id=season_id,
-                zone_id=None,
                 source_system="discord",
                 xp_delta=0,
                 star_delta=0,
-                metadata_={"old_level": user.level - 1, "new_level": user.level},
+                metadata_={"old_level": old_level, "new_level": user.level},
             ))
 
         # Update season stats
@@ -192,7 +202,7 @@ def process_event(
                 tick_minutes = cache.get_int("voice_tick_minutes", 10)
                 stats.voice_minutes += tick_minutes
 
-            # Check achievements
+            # Build achievement context
             earned_ids = get_earned_achievement_ids(session, event.user_id)
             stats_dict = {
                 "messages_sent": stats.messages_sent,
@@ -201,14 +211,24 @@ def process_event(
                 "threads_created": stats.threads_created,
                 "voice_minutes": stats.voice_minutes,
             }
-            new_achievements = check_achievements(
-                event.guild_id,
-                cache,
+            event_counts = _get_event_counts(session, event.user_id)
+
+            ctx = AchievementContext(
                 user_xp=user.xp,
+                user_level=user.level,
+                old_level=old_level if result.leveled_up else None,
                 season_stars=stats.season_stars,
                 lifetime_stars=stats.lifetime_stars,
                 stats=stats_dict,
-                already_earned=earned_ids,
+                event_type=event.event_type,
+                event_counts=event_counts,
+            )
+
+            new_achievements = check_achievements(
+                event.guild_id,
+                cache,
+                ctx,
+                earned_ids,
             )
 
             for tmpl_id in new_achievements:
@@ -229,7 +249,6 @@ def process_event(
                         user_id=event.user_id,
                         event_type=InteractionType.ACHIEVEMENT_EARNED.value,
                         season_id=season_id,
-                        zone_id=None,
                         source_system="discord",
                         xp_delta=tmpl.xp_reward,
                         star_delta=0,
@@ -245,12 +264,6 @@ def process_event(
         return result, False
 
 
-def _resolve_zone_id(event: SynapseEvent, cache: ConfigCache) -> int | None:
-    """Resolve the zone_id for an event's channel."""
-    zone = cache.get_zone_for_channel(event.channel_id)
-    return zone.id if zone else None
-
-
 def award_manual(
     engine: Engine,
     *,
@@ -263,7 +276,7 @@ def award_manual(
     admin_id: int,
 ) -> User:
     """Award XP and/or Gold manually (admin command or dashboard)."""
-    with Session(engine) as session:
+    with Session(engine, expire_on_commit=False) as session:
         user = get_or_create_user(session, user_id, display_name)
         season = get_active_season(session, guild_id)
         season_id = season.id if season else None
@@ -275,7 +288,6 @@ def award_manual(
             user_id=user_id,
             event_type=InteractionType.MANUAL_AWARD.value,
             season_id=season_id,
-            zone_id=None,
             source_system="admin",
             xp_delta=xp,
             star_delta=0,
@@ -330,7 +342,6 @@ def grant_achievement(
             user_id=user_id,
             event_type=InteractionType.ACHIEVEMENT_EARNED.value,
             season_id=season_id,
-            zone_id=None,
             source_system="admin",
             xp_delta=template.xp_reward,
             star_delta=0,

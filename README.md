@@ -69,6 +69,11 @@ Four services in Docker Compose:
    | `DISCORD_REDIRECT_URI` | OAuth2 callback URL |
    | `FRONTEND_URL` | Dashboard base URL |
 
+   Optional variables:
+   | Variable | Description |
+   |----------|-------------|
+   | `CORS_ALLOW_ORIGINS` | Comma-separated API CORS allowlist (defaults to `FRONTEND_URL`) |
+
 3. Edit `config.yaml` with your community info:
    ```yaml
    community_name: "My Community"
@@ -125,14 +130,14 @@ XP required for level N = level_base × (level_factor ^ N)
 
 Defaults: `level_base = 100`, `level_factor = 1.25`. Both configurable.
 
-## Zones
+## Categories
 
-Channels are grouped into **Zones** (mapped from Discord categories during bootstrap). Each zone has per-event-type multipliers for XP and Stars, editable in the admin dashboard. Unmapped channels fall back to a "general" zone or the first available zone.
+Channels are grouped into **Categories** (mapped from Discord categories during bootstrap). Each category has per-event-type multipliers for XP and Stars, editable in the admin dashboard. Unmapped channels fall back to a "general" category or the first available category.
 
 ## Event Pipeline
 
 ```
-Discord Event → Event Lake Write → SynapseEvent → Zone Classification
+Discord Event → Event Lake Write → SynapseEvent → Category Classification
 → Multiplier Lookup → Quality Modifier → Anti-Gaming Checks → XP Cap
 → Idempotent Persist → Stat Update → Achievement Check → Level-Up Check
 → Announcement (throttle-gated, preference-gated)
@@ -187,7 +192,7 @@ Each data source can be toggled on/off from the admin dashboard. Message content
 
 ### Pre-Computed Counters
 
-`event_counters` table maintains pre-aggregated counts by `(user_id, event_type, zone_id, period)` for O(1) reads. Periods: `lifetime`, `season`, `day:YYYY-MM-DD`.
+`event_counters` table maintains pre-aggregated counts by `(user_id, event_type, category_id, period)` for O(1) reads. Periods: `lifetime`, `season`, `day:YYYY-MM-DD`.
 
 ### Maintenance
 
@@ -262,7 +267,7 @@ Base URL: `/api`
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET/POST/PATCH | `/admin/zones` | Zone CRUD |
+| GET/POST/PATCH | `/admin/categories` | Category CRUD |
 | GET/POST/PATCH | `/admin/achievements` | Achievement template CRUD |
 | POST | `/admin/awards/xp-gold` | Manual XP/Gold award |
 | POST | `/admin/awards/achievement` | Grant achievement |
@@ -310,7 +315,7 @@ Base URL: `/api`
 | Route | Description |
 |-------|-------------|
 | `/admin/setup` | First-run bootstrap wizard |
-| `/admin/zones` | Zone management (channels, multipliers) |
+| `/admin/categories` | Category management (channels, multipliers) |
 | `/admin/achievements` | Achievement template builder |
 | `/admin/awards` | Manual XP/Gold/Achievement awards |
 | `/admin/settings` | Dashboard and economy settings editor |
@@ -330,9 +335,9 @@ PostgreSQL 16 with 15 tables:
 | `user_stats` | Per-season engagement counters (messages, reactions, threads, voice) |
 | `seasons` | Competitive time windows |
 | `activity_log` | Append-only event journal with idempotent insert |
-| `zones` | Channel groupings |
-| `zone_channels` | Zone ↔ channel mapping |
-| `zone_multipliers` | Per-zone, per-event-type XP/Star weights |
+| `categories` | Channel groupings |
+| `category_channels` | Category ↔ channel mapping |
+| `category_multipliers` | Per-category, per-event-type XP/Star weights |
 | `achievement_templates` | Admin-defined recognition with rarity and rewards |
 | `user_achievements` | Earned badges with timestamps |
 | `quests` | Gamified tasks (schema present, UI deferred) |
@@ -340,7 +345,7 @@ PostgreSQL 16 with 15 tables:
 | `user_preferences` | Per-user announcement opt-outs |
 | `settings` | Key-value configuration store (JSON values, categorized) |
 | `event_lake` | Append-only ephemeral event capture with JSONB payloads |
-| `event_counters` | Pre-computed aggregation cache by user/type/zone/period |
+| `event_counters` | Pre-computed aggregation cache by user/type/category/period |
 
 ### Key Patterns
 
@@ -406,9 +411,9 @@ synapse/
 │   ├── reward_service.py       # Calculate → persist → stats → achievements
 │   ├── announcement_service.py # Preference-gated, throttle-safe announcements
 │   ├── event_lake_writer.py    # Event Lake writes with counter updates
-│   ├── admin_service.py        # Zone/achievement/season CRUD + audit logging
+│   ├── admin_service.py        # Category/achievement/season CRUD + audit logging
 │   ├── settings_service.py     # Settings read/write with NOTIFY
-│   ├── channel_service.py      # Guild channel → zone auto-mapping
+│   ├── channel_service.py      # Guild channel → category auto-mapping
 │   ├── setup_service.py        # First-run bootstrap, guild snapshots
 │   ├── retention_service.py    # Event Lake cleanup
 │   ├── reconciliation_service.py # Counter drift correction

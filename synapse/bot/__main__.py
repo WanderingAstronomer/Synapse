@@ -11,7 +11,7 @@ Wiring:
 6. Create the SynapseBot and hand it config + engine + cache.
 7. Start the bot (blocking — runs the asyncio event loop).
 
-First-run initialisation (zones, channels, settings) is handled by the
+First-run initialisation (categories, channels, settings) is handled by the
 admin dashboard setup wizard, not by startup seed files.
 
 Run with::
@@ -26,6 +26,11 @@ import os
 import sys
 
 from dotenv import load_dotenv
+
+# Ensure UTF-8 for log output regardless of locale (TD-009)
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 from synapse.bot.core import SynapseBot
 from synapse.config import load_config
@@ -60,6 +65,11 @@ def main() -> None:
             "Copy .env.example → .env and paste your bot token."
         )
         sys.exit(1)
+
+    # Write a PID file so the Docker healthcheck can verify we're alive.
+    pid_path = "/tmp/synapse_bot.pid"
+    with open(pid_path, "w") as f:
+        f.write(str(os.getpid()))
 
     # 2. Soft configuration.
     cfg = load_config()

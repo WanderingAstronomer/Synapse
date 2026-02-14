@@ -47,7 +47,10 @@ class Membership(commands.Cog, name="Membership"):
             logger.info("Member joined: %s (ID: %d)", member.display_name, member.id)
 
         except Exception:
-            logger.exception("Error processing member_join for %s", member.id)
+            logger.exception(
+                "Error processing member_join for %s", member.id,
+                extra={"event_type": "member_join", "user_id": member.id},
+            )
 
     @commands.Cog.listener()
     async def on_member_remove(self, member: discord.Member) -> None:
@@ -64,7 +67,10 @@ class Membership(commands.Cog, name="Membership"):
             logger.info("Member left: %s (ID: %d)", member.display_name, member.id)
 
         except Exception:
-            logger.exception("Error processing member_leave for %s", member.id)
+            logger.exception(
+                "Error processing member_leave for %s", member.id,
+                extra={"event_type": "member_leave", "user_id": member.id},
+            )
 
 
 async def setup(bot: SynapseBot) -> None:

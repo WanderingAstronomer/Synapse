@@ -311,18 +311,13 @@ class TestEventLakeAPI:
         from fastapi.testclient import TestClient
 
         from synapse.api.main import app
-        return TestClient(app)
+        return TestClient(app, raise_server_exceptions=False)
 
     @pytest.fixture
     def admin_token(self):
         """Generate a valid admin JWT for test requests."""
-        import jwt
-
-        from synapse.api.deps import JWT_ALGORITHM, JWT_SECRET
-        return jwt.encode(
-            {"sub": "12345", "username": "TestAdmin", "is_admin": True},
-            JWT_SECRET, algorithm=JWT_ALGORITHM,
-        )
+        from conftest import make_admin_token
+        return make_admin_token(sub="12345", username="TestAdmin")
 
     def _auth_headers(self, token: str) -> dict:
         return {"Authorization": f"Bearer {token}"}
@@ -422,30 +417,3 @@ class TestPeriodicTasksCog:
         from synapse.bot.cogs.tasks import PeriodicTasks
         assert hasattr(PeriodicTasks, "reconciliation_loop")
 
-
-# ==========================================================================
-# STORAGE ESTIMATE LOGIC TESTS
-# ==========================================================================
-class TestStorageEstimate:
-    """Tests for the storage estimation constants and logic."""
-
-    def test_avg_row_bytes_constant(self):
-        """The avg row bytes should match the design doc (~340)."""
-        # We test the value is in a reasonable range per §3B.5
-        AVG = 340  # Design doc estimate
-        assert 200 <= AVG <= 500
-
-    def test_projection_math(self):
-        """Verify the 90-day projection formula."""
-        total_rows = 10000
-        days_of_data = 10
-        avg_bytes = 340
-
-        daily_rate = total_rows / days_of_data
-        projected_90d_bytes = daily_rate * 90 * avg_bytes
-        projected_90d_mb = projected_90d_bytes / (1024 * 1024)
-
-        assert daily_rate == 1000.0
-        expected_90d_bytes = 1000 * 90 * 340
-        assert projected_90d_bytes == expected_90d_bytes
-        assert projected_90d_mb == pytest.approx(expected_90d_bytes / (1024 * 1024), rel=1e-3)

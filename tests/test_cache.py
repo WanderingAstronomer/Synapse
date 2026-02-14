@@ -18,75 +18,41 @@ from synapse.engine.cache import ALLOWED_NOTIFY_TABLES, ConfigCache, send_notify
 class TestNotifyRouting:
     """Test that NOTIFY payloads route to the correct reload method."""
 
-    @patch.object(ConfigCache, "_load_zones")
-    @patch.object(ConfigCache, "_load_multipliers")
-    @patch.object(ConfigCache, "_load_achievements")
-    def test_zones_notify(self, mock_ach, mock_mult, mock_zones):
-        """NOTIFY payload 'zones' should reload zones."""
+    @pytest.fixture
+    def cache(self):
+        """Build a ConfigCache bypassing __init__ (no DB needed)."""
         engine = MagicMock()
-        cache = ConfigCache.__new__(ConfigCache)
-        cache._engine = engine
-        cache._zones = {}
-        cache._channel_zone_map = {}
-        cache._multipliers = {}
-        cache._achievements = []
-        cache._lock = __import__("threading").Lock()
+        c = ConfigCache(engine)
+        return c
 
-        cache.handle_notify("zones")
-        mock_zones.assert_called_once()
+    @pytest.mark.parametrize(
+        "table_name, expected_method",
+        [
+            ("channel_type_defaults", "_load_type_defaults"),
+            ("channel_overrides", "_load_overrides"),
+            ("channels", "_load_channels"),
+            ("achievement_templates", "_load_achievements"),
+        ],
+    )
+    def test_notify_routes_to_correct_reload(self, cache, table_name, expected_method):
+        """NOTIFY payload should route to the correct reload method."""
+        with patch.object(cache, expected_method) as mock_method:
+            cache.handle_notify(table_name)
+            mock_method.assert_called_once()
 
-    @patch.object(ConfigCache, "_load_zones")
-    @patch.object(ConfigCache, "_load_multipliers")
-    @patch.object(ConfigCache, "_load_achievements")
-    def test_multipliers_notify(self, mock_ach, mock_mult, mock_zones):
-        """NOTIFY payload 'zone_multipliers' should reload multipliers."""
-        engine = MagicMock()
-        cache = ConfigCache.__new__(ConfigCache)
-        cache._engine = engine
-        cache._zones = {}
-        cache._channel_zone_map = {}
-        cache._multipliers = {}
-        cache._achievements = []
-        cache._lock = __import__("threading").Lock()
-
-        cache.handle_notify("zone_multipliers")
-        mock_mult.assert_called_once()
-
-    @patch.object(ConfigCache, "_load_zones")
-    @patch.object(ConfigCache, "_load_multipliers")
-    @patch.object(ConfigCache, "_load_achievements")
-    def test_achievements_notify(self, mock_ach, mock_mult, mock_zones):
-        """NOTIFY payload 'achievement_templates' should reload achievements."""
-        engine = MagicMock()
-        cache = ConfigCache.__new__(ConfigCache)
-        cache._engine = engine
-        cache._zones = {}
-        cache._channel_zone_map = {}
-        cache._multipliers = {}
-        cache._achievements = []
-        cache._lock = __import__("threading").Lock()
-
-        cache.handle_notify("achievement_templates")
-        mock_ach.assert_called_once()
-
-    @patch.object(ConfigCache, "_load_zones")
-    @patch.object(ConfigCache, "_load_multipliers")
-    @patch.object(ConfigCache, "_load_achievements")
-    def test_unknown_notify_ignored(self, mock_ach, mock_mult, mock_zones):
+    def test_unknown_notify_ignored(self, cache):
         """Unknown table name should not trigger any reload."""
-        engine = MagicMock()
-        cache = ConfigCache.__new__(ConfigCache)
-        cache._engine = engine
-        cache._zones = {}
-        cache._channel_zone_map = {}
-        cache._multipliers = {}
-        cache._achievements = []
-        cache._lock = __import__("threading").Lock()
-
-        cache.handle_notify("unknown_table")
-        mock_zones.assert_not_called()
-        mock_mult.assert_not_called()
-        mock_ach.assert_not_called()
+        with (
+            patch.object(cache, "_load_channels") as mock_ch,
+            patch.object(cache, "_load_type_defaults") as mock_td,
+            patch.object(cache, "_load_overrides") as mock_ov,
+            patch.object(cache, "_load_achievements") as mock_ach,
+        ):
+            cache.handle_notify("unknown_table")
+            mock_ch.assert_not_called()
+            mock_td.assert_not_called()
+            mock_ov.assert_not_called()
+            mock_ach.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -118,7 +84,7 @@ class TestSendNotifyAllowlist:
     def test_rejects_sql_injection_attempt(self):
         engine = MagicMock()
         with pytest.raises(ValueError, match="Invalid table name"):
-            send_notify(engine, "zones'; DROP TABLE users; --")
+            send_notify(engine, "categories'; DROP TABLE users; --")
 
     def test_rejects_empty_string(self):
         engine = MagicMock()
@@ -131,9 +97,8 @@ class TestSendNotifyAllowlist:
 
     def test_allowlist_matches_handle_notify_branches(self):
         """Every table in the allowlist should be handled (or handled via alias)."""
-        # All tables referenced in handle_notify should be in the allowlist
-        for table in ("zones", "zone_channels", "zone_multipliers",
-                      "achievement_templates", "settings"):
+        for table in ("channel_type_defaults", "channel_overrides",
+                      "channels", "achievement_templates", "settings"):
             assert table in ALLOWED_NOTIFY_TABLES
 
 

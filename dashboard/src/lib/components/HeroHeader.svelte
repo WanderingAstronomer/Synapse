@@ -8,7 +8,7 @@
 		metrics?: { label: string; value: number; icon?: string }[];
 	}
 
-	let { title = 'Synapse Community Dashboard', subtitle = 'Community engagement at a glance', emoji = '⚡', metrics = [] }: Props = $props();
+	let { title = 'Synapse Community Dashboard', subtitle = 'Community engagement at a glance', emoji = '', metrics = [] }: Props = $props();
 </script>
 
 <header class="relative overflow-hidden rounded-2xl border border-brand-700/30 p-8 mb-8" style="background: linear-gradient(135deg, #1e0038, #3b0764, #13131a); background-size: 200% 200%; animation: gradientShift 8s ease infinite;">
@@ -23,7 +23,7 @@
 
 	<div class="relative z-10">
 		<div class="flex items-center gap-3 mb-2">
-			<span class="text-3xl animate-float">{emoji}</span>
+			{#if emoji}<span class="text-3xl animate-float">{emoji}</span>{/if}
 			<h1 class="text-3xl font-extrabold text-white tracking-tight text-glow-brand">{title}</h1>
 		</div>
 		<p class="text-zinc-400 text-lg max-w-xl">{subtitle}</p>

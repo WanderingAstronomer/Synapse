@@ -16,7 +16,7 @@ All notable changes to Synapse are documented here.
 ### Seedless Bootstrap
 
 - Deleted `synapse/services/seed.py` and `seeds/` directory. The bot no longer seeds data on startup.
-- Added `setup_service.py` — First-run bootstrap reads the live Discord guild structure (categories, channels) and creates zones, channel mappings, a default season, and 18 default settings.
+- Added `setup_service.py` — First-run bootstrap reads the live Discord guild structure (categories, channels) and creates categories, channel mappings, a default season, and 18 default settings.
 - Guild snapshot written to the `settings` table on every bot connect for API access to channel metadata.
 - Setup API endpoints: `GET /api/admin/setup/status` and `POST /api/admin/setup/bootstrap`.
 - Dashboard setup wizard at `/admin/setup` — admin layout auto-redirects here if the guild hasn't been bootstrapped.
@@ -51,7 +51,7 @@ Initial release.
 ### Core Systems
 
 - Three-currency economy: XP (progression/leveling), Stars (seasonal recognition), Gold (spendable).
-- Zone-based channel groupings with per-event-type XP and Star multipliers.
+- Category-based channel groupings with per-event-type XP and Star multipliers.
 - Quality-weighted reward engine: message length, code blocks, links, attachments, emoji spam penalty.
 - Anti-gaming: self-reaction filter, per-reactor-per-author pair cap (3/day), diminishing returns, unique-reactor weighting, velocity cap, message cooldown.
 - Exponential leveling formula: `level_base × level_factor^level` (defaults 100, 1.25). Gold bonus on level-up.
@@ -62,7 +62,7 @@ Initial release.
 
 - Append-only capture of 9 Discord gateway event types: message_create, reaction_add, reaction_remove, thread_create, voice_join, voice_leave, voice_move, member_join, member_leave.
 - Idempotent inserts with source_id deduplication.
-- Pre-computed event counters by (user, type, zone, period) for O(1) reads.
+- Pre-computed event counters by (user, type, category, period) for O(1) reads.
 - Per-source toggles via admin dashboard.
 - Privacy-safe: message content never persisted, only metadata.
 - Retention cleanup (daily, default 90 days, batch 5,000).
@@ -79,14 +79,14 @@ Initial release.
 - Background tasks: heartbeat (30s), voice tick (10min), retention (24h), reconciliation (7d).
 - Announcement service with per-user preference gating, per-channel throttling (3/min), and async drain queue.
 - Auto-creates `#synapse-achievements` channel on startup.
-- Auto-discovers guild channels and maps to zones by category name.
+- Auto-discovers guild channels and maps to categories by Discord category name.
 - In-memory `ConfigCache` with PG LISTEN/NOTIFY for near-instant invalidation.
 
 ### API (FastAPI)
 
 - 8 public endpoints: health, bot heartbeat, metrics, leaderboard, activity, achievements, recent achievements, public settings.
 - 3 auth endpoints: OAuth2 login redirect, callback (code exchange + admin role check + JWT issuance), current admin info.
-- 17 admin endpoints: zone CRUD, achievement CRUD, manual awards, user search, settings CRUD, audit log, setup/bootstrap, live logs, name resolution.
+- 17 admin endpoints: category CRUD, achievement CRUD, manual awards, user search, settings CRUD, audit log, setup/bootstrap, live logs, name resolution.
 - 9 Event Lake admin endpoints: event browser, data source toggles, health metrics, storage estimate, retention/reconciliation/backfill triggers, counter browser.
 - Discord OAuth2 → JWT (HS256, 12h expiry) authentication.
 - Admin rate limiting middleware (30 mutations/minute per admin).
@@ -96,7 +96,7 @@ Initial release.
 ### Dashboard (SvelteKit)
 
 - 4 public pages: overview (hero metrics, activity ticker, champion spotlight), leaderboard, activity feed with charts, achievement gallery.
-- 8 admin pages: setup wizard, zones, achievements, awards, settings, audit log, live logs, data source toggles.
+- 8 admin pages: setup wizard, categories, achievements, awards, settings, audit log, live logs, data source toggles.
 - Client-side SPA (SSR disabled) with Svelte 5, TypeScript, Tailwind CSS.
 - 10 reusable components: Avatar, ConfirmModal, EmptyState, FlashMessage, HeroHeader, MetricCard, ProgressBar, RarityBadge, Sidebar, SynapseLoader.
 - 4 stores: auth (JWT state), currency (configurable labels), flash (toasts), names (batched ID resolution).
@@ -104,7 +104,7 @@ Initial release.
 
 ### Database (PostgreSQL 16)
 
-- 15 tables: users, user_stats, seasons, activity_log, zones, zone_channels, zone_multipliers, achievement_templates, user_achievements, quests, admin_log, user_preferences, settings, event_lake, event_counters.
+- 15 tables: users, user_stats, seasons, activity_log, categories, category_channels, category_multipliers, achievement_templates, user_achievements, quests, admin_log, user_preferences, settings, event_lake, event_counters.
 - JSONB columns for flexible metadata and configuration.
 - Partial unique indexes for idempotent event insertion.
 - PG LISTEN/NOTIFY for cache invalidation.

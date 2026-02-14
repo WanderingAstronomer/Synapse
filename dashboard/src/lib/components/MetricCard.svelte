@@ -9,7 +9,7 @@
 		color?: 'brand' | 'gold' | 'green' | 'blue' | 'pink';
 	}
 
-	let { label, value, icon = '📈', trend = null, color = 'brand' }: Props = $props();
+	let { label, value, icon = '', trend = null, color = 'brand' }: Props = $props();
 
 	const ringColors = {
 		brand: 'ring-brand-500/20',
@@ -39,8 +39,10 @@
 				</p>
 			{/if}
 		</div>
+		{#if icon}
 		<div class="w-10 h-10 rounded-xl flex items-center justify-center text-lg {iconBgs[color]} transition-transform duration-300 group-hover:scale-110">
 			{icon}
 		</div>
+		{/if}
 	</div>
 </div>

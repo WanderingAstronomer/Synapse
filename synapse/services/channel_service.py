@@ -1,92 +1,78 @@
 """
-synapse.services.channel_service — Guild Channel Auto-Discovery
-=================================================================
+synapse.services.channel_service — Guild Channel Management
+=============================================================
 
-Maps guild channels to zones based on category name matching.
-Extracted from seed.py to keep seed logic and channel logic separate.
+- **sync_channels_from_snapshot**: Upserts Discord channel metadata into the
+  ``channels`` table so the dashboard can display names/types without the bot.
 """
 
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from synapse.database.models import Zone, ZoneChannel
+from synapse.database.models import Channel
 
 logger = logging.getLogger(__name__)
 
 
-def sync_guild_channels(engine, guild_id: int, channels: list[dict]) -> int:
-    """Auto-discover and map guild channels to zones.
+# ---------------------------------------------------------------------------
+# Channel metadata sync (guild snapshot → channels table)
+# ---------------------------------------------------------------------------
+
+def sync_channels_from_snapshot(engine, guild_id: int, channels: list[dict]) -> dict:
+    """Upsert Discord channel metadata into the ``channels`` table.
 
     Parameters
     ----------
     engine : SQLAlchemy Engine
     guild_id : Discord guild snowflake
-    channels : list of dicts with keys: id, name, category_name
+    channels : list of dicts with keys: id, name, type, category_id, category_name
 
-    Returns the number of newly mapped channels.
+    Returns a summary dict: {"upserted": N, "removed": N}
     """
+    now = datetime.now(UTC)
+    upserted = 0
+    removed = 0
+
     with Session(engine) as session:
-        # Get existing zone mappings
-        existing_channel_ids: set[int] = set()
-        existing_mappings = session.scalars(
-            select(ZoneChannel)
-        ).all()
-        for m in existing_mappings:
-            existing_channel_ids.add(m.channel_id)
+        incoming_ids: set[int] = set()
 
-        # Get all zones for this guild
-        zones = session.scalars(
-            select(Zone).where(Zone.guild_id == guild_id, Zone.active.is_(True))
-        ).all()
-        zone_by_name: dict[str, Zone] = {z.name.lower(): z for z in zones}
-
-        # Find the general fallback zone
-        fallback_zone = zone_by_name.get("general")
-        if not fallback_zone:
-            # Use the first zone if no 'general' exists
-            if zones:
-                fallback_zone = zones[0]
-            else:
-                logger.warning(
-                    "No zones exist for guild %d — skipping channel discovery.", guild_id
-                )
-                return 0
-
-        mapped_count = 0
         for ch in channels:
             ch_id = ch["id"]
-            if ch_id in existing_channel_ids:
-                continue  # Already mapped
+            incoming_ids.add(ch_id)
 
-            # Try to match category name to zone name
-            category = (ch.get("category_name") or "").lower()
-            target_zone = None
-            for zone_name, zone in zone_by_name.items():
-                if zone_name in category or category in zone_name:
-                    target_zone = zone
-                    break
-
-            if target_zone is None:
-                target_zone = fallback_zone
-
-            session.add(ZoneChannel(zone_id=target_zone.id, channel_id=ch_id))
-            mapped_count += 1
-            logger.info(
-                "Auto-mapped channel #%s (%d) → zone '%s'",
-                ch.get("name", "unknown"), ch_id, target_zone.name,
+            row = Channel(
+                id=ch_id,
+                guild_id=guild_id,
+                name=ch.get("name", "unknown"),
+                type=ch.get("type", "text"),
+                discord_category_id=ch.get("category_id"),
+                discord_category_name=ch.get("category_name"),
+                position=ch.get("position", 0),
+                last_synced_at=now,
             )
+            session.merge(row)
+            upserted += 1
 
-        if mapped_count:
-            session.commit()
-            logger.info(
-                "Auto-discovery complete: %d new channels mapped for guild %d.",
-                mapped_count, guild_id,
+        # Remove channels that are no longer in the guild
+        existing = session.scalars(
+            select(Channel.id).where(Channel.guild_id == guild_id)
+        ).all()
+        stale_ids = set(existing) - incoming_ids
+        if stale_ids:
+            session.execute(
+                Channel.__table__.delete().where(Channel.id.in_(stale_ids))
             )
-        else:
-            logger.info("Auto-discovery: no new channels to map for guild %d.", guild_id)
+            removed = len(stale_ids)
 
-        return mapped_count
+        session.commit()
+
+    logger.info(
+        "Channel sync for guild %d: %d upserted, %d removed.",
+        guild_id, upserted, removed,
+    )
+    return {"upserted": upserted, "removed": removed}

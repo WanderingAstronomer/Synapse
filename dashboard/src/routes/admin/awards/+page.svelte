@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { api, type AdminUser, type Achievement } from '$lib/api';
-	import { flash } from '$lib/stores/flash';
-	import { primaryCurrency, secondaryCurrency } from '$lib/stores/currency';
+	import { flash } from '$lib/stores/flash.svelte';
+	import { currency } from '$lib/stores/currency.svelte';
 	import Avatar from '$lib/components/Avatar.svelte';
 	import { fmt } from '$lib/utils';
 
@@ -50,16 +50,16 @@
 
 	async function awardXpGold() {
 		if (!selectedUser) { flash.warning('Select a user first'); return; }
-		if (xpAmount === 0 && goldAmount === 0) { flash.warning(`Enter ${$primaryCurrency} or ${$secondaryCurrency} amount`); return; }
+		if (xpAmount === 0 && goldAmount === 0) { flash.warning(`Enter ${currency.primary} or ${currency.secondary} amount`); return; }
 		try {
 			const res = await api.admin.awardXpGold({
-				user_id: parseInt(selectedUser.id),
+				user_id: selectedUser.id,
 				display_name: selectedUser.discord_name,
 				xp: xpAmount,
 				gold: goldAmount,
 				reason: reason.trim(),
 			});
-			flash.success(`Awarded ${xpAmount} ${$primaryCurrency} + ${goldAmount} ${$secondaryCurrency} → now ${fmt(res.xp)} ${$primaryCurrency}, Lvl ${res.level}`);
+			flash.success(`Awarded ${xpAmount} ${currency.primary} + ${goldAmount} ${currency.secondary} → now ${fmt(res.xp)} ${currency.primary}, Lvl ${res.level}`);
 			xpAmount = 0;
 			goldAmount = 0;
 			reason = '';
@@ -71,7 +71,7 @@
 		if (!selectedAchievementId) { flash.warning('Select an achievement'); return; }
 		try {
 			const res = await api.admin.grantAchievement({
-				user_id: parseInt(selectedUser.id),
+				user_id: selectedUser.id,
 				display_name: selectedUser.discord_name,
 				achievement_id: selectedAchievementId,
 			});
@@ -84,8 +84,8 @@
 <svelte:head><title>Admin: Awards — Synapse</title></svelte:head>
 
 <div class="mb-6">
-	<h1 class="text-2xl font-bold text-white">🎁 Manual Awards</h1>
-	<p class="text-sm text-zinc-500 mt-1">Grant {$primaryCurrency}, {$secondaryCurrency}, or achievements to specific members.</p>
+	<h1 class="text-2xl font-bold text-white">Manual Awards</h1>
+	<p class="text-sm text-zinc-500 mt-1">Grant {currency.primary}, {currency.secondary}, or achievements to specific members.</p>
 </div>
 
 <!-- Tabs -->
@@ -95,14 +95,14 @@
 			{tab === 'currency' ? 'bg-brand-600 text-white shadow-md shadow-brand-600/30' : 'bg-surface-200 text-zinc-400 hover:text-zinc-200'}"
 		onclick={() => (tab = 'currency')}
 	>
-		✨ {$primaryCurrency} & {$secondaryCurrency}
+		{ currency.primary} & {currency.secondary}
 	</button>
 	<button
 		class="px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 hover:scale-[1.03] active:scale-[0.97]
 			{tab === 'achievement' ? 'bg-brand-600 text-white shadow-md shadow-brand-600/30' : 'bg-surface-200 text-zinc-400 hover:text-zinc-200'}"
 		onclick={() => (tab = 'achievement')}
 	>
-		🏅 Achievement
+		Achievement
 	</button>
 </div>
 
@@ -145,14 +145,14 @@
 
 {#if tab === 'currency'}
 	<div class="card animate-fade-in">
-		<h3 class="text-sm font-semibold text-zinc-300 mb-4">Award {$primaryCurrency} & {$secondaryCurrency}</h3>
+		<h3 class="text-sm font-semibold text-zinc-300 mb-4">Award {currency.primary} & {currency.secondary}</h3>
 		<div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
 			<div>
-				<label class="label" for="award-xp">{$primaryCurrency} Amount</label>
+				<label class="label" for="award-xp">{currency.primary} Amount</label>
 				<input id="award-xp" class="input" type="number" bind:value={xpAmount} placeholder="0" />
 			</div>
 			<div>
-				<label class="label" for="award-gold">{$secondaryCurrency} Amount</label>
+				<label class="label" for="award-gold">{currency.secondary} Amount</label>
 				<input id="award-gold" class="input" type="number" bind:value={goldAmount} placeholder="0" />
 			</div>
 			<div>
@@ -161,7 +161,7 @@
 			</div>
 		</div>
 		<button class="btn-primary mt-4" onclick={awardXpGold}>
-			🎁 Award
+			Award
 		</button>
 	</div>
 {:else}
@@ -177,7 +177,7 @@
 			</select>
 		</div>
 		<button class="btn-primary mt-4" onclick={grantAchievement}>
-			🏅 Grant
+			Grant
 		</button>
 	</div>
 {/if}

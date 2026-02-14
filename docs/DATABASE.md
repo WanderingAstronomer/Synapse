@@ -63,7 +63,7 @@ Append-only event journal. Core of the reward pipeline.
 | `user_id` | BIGINT FK → users | |
 | `event_type` | VARCHAR(50) | InteractionType enum value |
 | `season_id` | INTEGER FK → seasons | Nullable (SET NULL on delete) |
-| `zone_id` | INTEGER FK → zones | Nullable (SET NULL on delete) |
+| `category_id` | INTEGER FK → categories | Nullable (SET NULL on delete) |
 | `source_system` | VARCHAR(30) | Default "discord" |
 | `source_event_id` | VARCHAR(100) | For idempotent insert |
 | `xp_delta` | INTEGER | XP awarded |
@@ -76,9 +76,9 @@ Indexes:
 - `ix_activity_log_user_time` on `(user_id, timestamp)`
 - `ix_activity_log_timestamp` on `timestamp`
 - `ix_activity_log_event_time` on `(event_type, timestamp)`
-- `ix_activity_log_zone_time` on `(zone_id, timestamp)`
+- `ix_activity_log_category_time` on `(category_id, timestamp)`
 
-### zones
+### categories
 
 Channel groupings. Created from Discord categories during bootstrap.
 
@@ -94,30 +94,30 @@ Channel groupings. Created from Discord categories during bootstrap.
 
 Unique: `(guild_id, name)`.
 
-### zone_channels
+### category_channels
 
-Zone ↔ channel mapping. Composite PK.
+Category ↔ channel mapping. Composite PK.
 
 | Column | Type | Notes |
 |--------|------|-------|
-| `zone_id` | INTEGER PK, FK → zones | |
+| `category_id` | INTEGER PK, FK → categories | |
 | `channel_id` | BIGINT PK | Discord channel snowflake |
 
-Indexes: `ix_zone_channels_channel_id` on `channel_id`.
+Indexes: `ix_category_channels_channel_id` on `channel_id`.
 
-### zone_multipliers
+### category_multipliers
 
-Per-zone, per-event-type reward weights.
+Per-category, per-event-type reward weights.
 
 | Column | Type | Notes |
 |--------|------|-------|
 | `id` | SERIAL PK | |
-| `zone_id` | INTEGER FK → zones | |
+| `category_id` | INTEGER FK → categories | |
 | `interaction_type` | VARCHAR(50) | Event type name |
 | `xp_multiplier` | FLOAT | Default 1.0 |
 | `star_multiplier` | FLOAT | Default 1.0 |
 
-Unique: `(zone_id, interaction_type)`.
+Unique: `(category_id, interaction_type)`.
 
 ### achievement_templates
 
@@ -250,7 +250,7 @@ Pre-computed aggregation cache. Updated transactionally with each Event Lake ins
 |--------|------|-------|
 | `user_id` | BIGINT PK | |
 | `event_type` | VARCHAR(64) PK | |
-| `zone_id` | INTEGER PK | 0 = global |
+| `category_id` | INTEGER PK | 0 = global |
 | `period` | VARCHAR(16) PK | "lifetime", "season", or "day:YYYY-MM-DD" |
 | `count` | BIGINT | |
 

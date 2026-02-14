@@ -37,7 +37,7 @@ Synapse runs as four services sharing a single PostgreSQL database:
 ┌──────────────────────────────────────────────────────────────────┐
 │  Service 3: DASHBOARD  (SvelteKit on :3000)                      │
 │  - Public pages (overview, leaderboard, activity, achievements)  │
-│  - Admin pages (zones, achievements, awards, settings, audit,    │
+│  - Admin pages (categories, achievements, awards, settings, audit,    │
 │    logs, data-sources, setup)                                    │
 │  - Talks to API only (never touches DB directly)                 │
 └──────────────────────────────────────────────────────────────────┘
@@ -77,7 +77,9 @@ FastAPI application with lifespan context manager. On startup:
 3. Install log ring buffer handler
 4. Validate JWT_SECRET (rejects missing, blank, short, weak values — will not start if insecure)
 
-Mounts four routers under `/api`: auth, public, admin, event_lake. Middleware: CORS, admin rate limiting.
+Mounts five routers under `/api`: auth, public, admin, event_lake, layouts. Middleware: CORS, admin rate limiting.
+
+Admin mutation rate limiting is keyed by JWT `sub` and persisted in the database so limits survive process restarts and apply consistently across instances.
 
 ### Dashboard (`SvelteKit on :3000`)
 
@@ -85,7 +87,7 @@ Client-side SPA (SSR disabled). Built-in API proxy at `/api/[...path]` forwards 
 
 ### Database
 
-PostgreSQL 16 Alpine. No application logic — purely a data store. The bot and API both connect via SQLAlchemy. LISTEN/NOTIFY used for cache invalidation (five channels: zones, zone_channels, zone_multipliers, achievement_templates, settings).
+PostgreSQL 16 Alpine. No application logic — purely a data store. The bot and API both connect via SQLAlchemy. LISTEN/NOTIFY used for cache invalidation (five channels: categories, category_channels, category_multipliers, achievement_templates, settings).
 
 ## Key Patterns
 
@@ -101,7 +103,7 @@ Under the hood: `asyncio.to_thread()` ships the sync function to a thread pool. 
 
 ### ConfigCache + LISTEN/NOTIFY
 
-`ConfigCache` holds zones, multipliers, achievements, and settings in memory. When an admin mutates config via the API, the service layer calls `send_notify(engine, table_name)`. The bot's listener thread receives the notification and reloads the affected partition. Propagation time: sub-second.
+`ConfigCache` holds categories, multipliers, achievements, and settings in memory. When an admin mutates config via the API, the service layer calls `send_notify(engine, table_name)`. The bot's listener thread receives the notification and reloads the affected partition. Propagation time: sub-second.
 
 The listener uses raw psycopg2 with `select()` polling. Reconnection uses exponential backoff (1s–60s) with random jitter.
 
@@ -136,8 +138,8 @@ Per-channel sliding window: max 3 embeds per 60 seconds. Excess embeds are queue
 2. Write to Event Lake (idempotent, counter update)
 3. Build SynapseEvent with metadata
 4. reward_service.process_event():
-   a. Classify zone (channel → zone lookup via cache)
-   b. Look up zone multipliers
+   a. Classify category (channel → category lookup via cache)
+   b. Look up category multipliers
    c. Calculate quality modifier (MESSAGE only)
    d. Apply anti-gaming checks
    e. Apply XP caps

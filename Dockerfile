@@ -25,6 +25,10 @@ WORKDIR /app
 ENV UV_COMPILE_BYTECODE=1
 # Use copy mode — required when cache and target are on different filesystems.
 ENV UV_LINK_MODE=copy
+# Force uv to use the system Python and never download a managed one.
+# This ensures the venv is linked against the Python in the base image.
+ENV UV_PYTHON_DOWNLOADS=never
+ENV UV_PYTHON=python3
 
 # Install dependencies FIRST (this layer changes rarely → cached).
 RUN --mount=type=cache,target=/root/.cache/uv \
@@ -43,11 +47,6 @@ FROM python:3.12-slim
 
 # Copy the pre-built virtual environment from the builder.
 COPY --from=builder /app/.venv /app/.venv
-
-# uv may create the venv using an uv-managed Python interpreter (a symlink under
-# /root/.local/share/uv/python). Copy that interpreter into the runtime image so
-# the venv entrypoints remain valid.
-COPY --from=builder /root/.local/share/uv/python /root/.local/share/uv/python
 
 # Put the venv at the front of PATH so `python` resolves to the right one.
 ENV PATH="/app/.venv/bin:$PATH"

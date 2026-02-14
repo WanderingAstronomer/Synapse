@@ -8,13 +8,13 @@ Tests unique-reactor weighting, per-user caps, and diminishing returns.
 from __future__ import annotations
 
 from synapse.database.models import InteractionType
-from synapse.engine.events import SynapseEvent
-from synapse.engine.reward import (
+from synapse.engine.anti_gaming import (
     AntiGamingTracker,
     apply_anti_gaming_stars,
     apply_anti_gaming_xp,
     apply_xp_caps,
 )
+from synapse.engine.events import SynapseEvent
 
 
 class TestSelfReactionFilter:

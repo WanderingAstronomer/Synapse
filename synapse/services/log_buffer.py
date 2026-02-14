@@ -17,8 +17,7 @@ from __future__ import annotations
 import logging
 import threading
 from collections import deque
-from datetime import datetime, timezone
-from typing import Any
+from datetime import UTC, datetime
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -107,7 +106,7 @@ class RingBufferHandler(logging.Handler):
         try:
             entry = LogEntry(
                 timestamp=datetime.fromtimestamp(
-                    record.created, tz=timezone.utc
+                    record.created, tz=UTC
                 ).isoformat(),
                 level=record.levelname,
                 logger=record.name,
@@ -134,7 +133,7 @@ def get_buffer() -> LogBuffer:
 def install_handler(level: int = logging.DEBUG) -> RingBufferHandler:
     """Install the ring-buffer handler on the root and uvicorn loggers.
 
-    The handler captures **everything** (DEBUG and up) into the buffer.
+    The handler captures records at *level* and above into the buffer.
     We explicitly attach to `uvicorn.access` and `uvicorn.error` because
     Uvicorn often disables propagation for these loggers.
     """
@@ -145,15 +144,6 @@ def install_handler(level: int = logging.DEBUG) -> RingBufferHandler:
     # 1. Attach to root logger
     root = logging.getLogger()
     root.addHandler(handler)
-
-    # Make sure root level is low enough for the buffer to capture everything
-    if root.level > logging.DEBUG:
-        # Store the console handler levels so they keep filtering
-        for h in root.handlers:
-            if isinstance(h, logging.StreamHandler) and not isinstance(h, RingBufferHandler):
-                if h.level == logging.NOTSET:
-                    h.setLevel(root.level)
-        root.setLevel(logging.DEBUG)
 
     # 2. Force propagation on Uvicorn loggers so they bubble up to root
     # where our RingBufferHandler is attached.
@@ -201,6 +191,6 @@ def set_capture_level(level_name: str) -> str:
             h.setLevel(numeric)
             return level_name
 
-    # Fallback: no handler found — adjust root
-    root.setLevel(numeric)
+    # Fallback: no handler found — install one at the requested level
+    install_handler(level=numeric)
     return level_name

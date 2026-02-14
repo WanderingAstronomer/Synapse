@@ -15,8 +15,7 @@ from datetime import datetime
 
 from synapse.database.models import InteractionType
 
-# Re-export for convenience
-__all__ = ["InteractionType", "SynapseEvent", "BASE_XP", "BASE_STARS"]
+__all__ = ["SynapseEvent", "BASE_XP", "BASE_STARS"]
 
 # ---------------------------------------------------------------------------
 # Base XP and Stars per interaction type (05 §5.2)
@@ -27,7 +26,6 @@ BASE_XP: dict[InteractionType, int] = {
     InteractionType.REACTION_RECEIVED: 3,
     InteractionType.THREAD_CREATE: 20,
     InteractionType.VOICE_TICK: 0,
-    InteractionType.QUEST_COMPLETE: 50,  # varies
     InteractionType.MANUAL_AWARD: 0,  # varies
     InteractionType.LEVEL_UP: 0,
     InteractionType.ACHIEVEMENT_EARNED: 0,
@@ -41,7 +39,6 @@ BASE_STARS: dict[InteractionType, int] = {
     InteractionType.REACTION_RECEIVED: 1,
     InteractionType.THREAD_CREATE: 2,
     InteractionType.VOICE_TICK: 1,
-    InteractionType.QUEST_COMPLETE: 5,
     InteractionType.MANUAL_AWARD: 0,
     InteractionType.LEVEL_UP: 0,
     InteractionType.ACHIEVEMENT_EARNED: 0,

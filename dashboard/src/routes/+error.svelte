@@ -3,7 +3,6 @@
 </script>
 
 <div class="flex flex-col items-center justify-center h-64 text-center px-4">
-	<span class="text-5xl mb-4">⚠️</span>
 	<h2 class="text-xl font-bold text-white mb-2">Something went wrong</h2>
 	<p class="text-sm text-zinc-400 mb-2 max-w-md">
 		{$page.error?.message || 'An unexpected error occurred.'}

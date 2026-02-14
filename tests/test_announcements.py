@@ -24,7 +24,6 @@ from synapse.services.announcement_service import (
     resolve_announce_channel,
 )
 from synapse.services.embeds import (
-    RARITY_COLORS,
     build_achievement_embed,
     build_achievement_fallback_embed,
     build_level_up_embed,
@@ -33,10 +32,10 @@ from synapse.services.embeds import (
 from synapse.services.throttle import AnnouncementThrottle
 
 
-# Helper to run async tests without pytest-asyncio
+# Helper to run async tests
 def run_async(coro):
-    """Run an async coroutine in a new event loop."""
-    return asyncio.get_event_loop_policy().new_event_loop().run_until_complete(coro)
+    """Run an async coroutine synchronously."""
+    return asyncio.run(coro)
 
 
 # ---------------------------------------------------------------------------
@@ -79,18 +78,23 @@ def _make_achievement_template(
     description: str = "A test achievement",
     xp_reward: int = 50,
     gold_reward: int = 25,
-    badge_image_url: str | None = None,
+    badge_image: str | None = None,
     announce_channel_id: int | None = None,
 ) -> MagicMock:
     """Create a mock AchievementTemplate."""
     tmpl = MagicMock()
     tmpl.id = ach_id
     tmpl.name = name
-    tmpl.rarity = rarity
+    # Build a mock rarity relationship object
+    rarity_obj = MagicMock()
+    rarity_obj.name = rarity
+    rarity_obj.emoji = "\u26aa"
+    rarity_obj.color = "#0000ff"
+    tmpl.rarity = rarity_obj
     tmpl.description = description
     tmpl.xp_reward = xp_reward
     tmpl.gold_reward = gold_reward
-    tmpl.badge_image_url = badge_image_url
+    tmpl.badge_image = badge_image
     tmpl.announce_channel_id = announce_channel_id
     return tmpl
 
@@ -434,14 +438,6 @@ class TestSendEmbed:
 class TestConstants:
     """Sanity checks on module-level constants."""
 
-    def test_all_rarities_have_colors(self):
-        for rarity in ("common", "uncommon", "rare", "epic", "legendary"):
-            assert rarity in RARITY_COLORS
-
     def test_all_rarities_have_emoji(self):
         for rarity in ("common", "uncommon", "rare", "epic", "legendary"):
             assert rarity in RARITY_EMOJI
-
-    def test_rarity_colors_are_discord_color(self):
-        for rarity, color in RARITY_COLORS.items():
-            assert isinstance(color, discord.Color), f"{rarity} color is not discord.Color"

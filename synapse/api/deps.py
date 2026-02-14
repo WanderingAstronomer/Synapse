@@ -5,7 +5,6 @@ synapse.api.deps — FastAPI dependency injection
 
 from __future__ import annotations
 
-import json
 import os
 from functools import lru_cache
 from typing import Annotated
@@ -75,21 +74,8 @@ def get_session(engine: Annotated[Engine, Depends(get_engine)]):
         yield session
 
 
-def get_setting(session: Session, key: str, default=None):
-    """Read a single setting value from the DB."""
-    from synapse.database.models import Setting
-    row = session.get(Setting, key)
-    if row is None:
-        return default
-    try:
-        return json.loads(row.value_json)
-    except (json.JSONDecodeError, TypeError):
-        return row.value_json
-
-
 def get_current_admin(
     authorization: Annotated[str | None, Header()] = None,
-    engine: Engine = Depends(get_engine),
 ) -> dict:
     """Validate JWT and return admin user payload. Raises 401 if invalid."""
     if not authorization or not authorization.startswith("Bearer "):

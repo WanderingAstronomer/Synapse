@@ -21,9 +21,11 @@ from pydantic import BaseModel
 from sqlalchemy import Engine, func, select
 from sqlalchemy.orm import Session
 
-from synapse.api.deps import get_current_admin, get_engine, get_session, get_setting
+from synapse.api.deps import get_engine, get_session
+from synapse.api.rate_limit import rate_limited_admin
 from synapse.database.models import EventCounter, EventLake
 from synapse.services.event_lake_writer import EventType
+from synapse.services.settings_service import get_setting_value
 
 router = APIRouter(prefix="/admin/event-lake", tags=["event-lake"])
 
@@ -122,15 +124,51 @@ class StorageEstimate(BaseModel):
 # Canonical data source definitions (§3B.4 + §3B.8)
 # ---------------------------------------------------------------------------
 DATA_SOURCES: list[dict[str, str]] = [
-    {"event_type": EventType.MESSAGE_CREATE,  "label": "Messages",         "description": "Message creation events — privacy-safe metadata only (no content)."},
-    {"event_type": EventType.REACTION_ADD,    "label": "Reactions (add)",   "description": "Emoji reactions added to messages."},
-    {"event_type": EventType.REACTION_REMOVE, "label": "Reactions (remove)","description": "Emoji reactions removed from messages."},
-    {"event_type": EventType.THREAD_CREATE,   "label": "Thread Creation",  "description": "New threads created in the server."},
-    {"event_type": EventType.VOICE_JOIN,      "label": "Voice Join",       "description": "Members joining a voice channel."},
-    {"event_type": EventType.VOICE_LEAVE,     "label": "Voice Leave",      "description": "Members leaving a voice channel (includes duration)."},
-    {"event_type": EventType.VOICE_MOVE,      "label": "Voice Move",       "description": "Members moving between voice channels."},
-    {"event_type": EventType.MEMBER_JOIN,     "label": "Member Join",      "description": "New members joining the server."},
-    {"event_type": EventType.MEMBER_LEAVE,    "label": "Member Leave",     "description": "Members leaving / being removed from the server."},
+    {
+        "event_type": EventType.MESSAGE_CREATE,
+        "label": "Messages",
+        "description": "Message creation events — privacy-safe metadata only (no content).",
+    },
+    {
+        "event_type": EventType.REACTION_ADD,
+        "label": "Reactions (add)",
+        "description": "Emoji reactions added to messages.",
+    },
+    {
+        "event_type": EventType.REACTION_REMOVE,
+        "label": "Reactions (remove)",
+        "description": "Emoji reactions removed from messages.",
+    },
+    {
+        "event_type": EventType.THREAD_CREATE,
+        "label": "Thread Creation",
+        "description": "New threads created in the server.",
+    },
+    {
+        "event_type": EventType.VOICE_JOIN,
+        "label": "Voice Join",
+        "description": "Members joining a voice channel.",
+    },
+    {
+        "event_type": EventType.VOICE_LEAVE,
+        "label": "Voice Leave",
+        "description": "Members leaving a voice channel (includes duration).",
+    },
+    {
+        "event_type": EventType.VOICE_MOVE,
+        "label": "Voice Move",
+        "description": "Members moving between voice channels.",
+    },
+    {
+        "event_type": EventType.MEMBER_JOIN,
+        "label": "Member Join",
+        "description": "New members joining the server.",
+    },
+    {
+        "event_type": EventType.MEMBER_LEAVE,
+        "label": "Member Leave",
+        "description": "Members leaving / being removed from the server.",
+    },
 ]
 
 # Settings key pattern for per-type toggles
@@ -143,7 +181,7 @@ _TOGGLE_KEY = "event_lake.source.{event_type}.enabled"
 @router.get("/events", response_model=EventListResponse)
 def list_events(
     session: Session = Depends(get_session),
-    admin: dict = Depends(get_current_admin),  # noqa: ARG001
+    admin: dict = Depends(rate_limited_admin),  # noqa: ARG001
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
     event_type: str | None = Query(None, description="Filter by event_type"),
@@ -199,13 +237,13 @@ def list_events(
 @router.get("/data-sources", response_model=list[DataSourceConfig])
 def list_data_sources(
     session: Session = Depends(get_session),
-    admin: dict = Depends(get_current_admin),  # noqa: ARG001
+    admin: dict = Depends(rate_limited_admin),  # noqa: ARG001
 ):
     """Return all data source types with their enabled/disabled state."""
     sources: list[DataSourceConfig] = []
     for ds in DATA_SOURCES:
         key = _TOGGLE_KEY.format(event_type=ds["event_type"])
-        enabled = get_setting(session, key, default=True)
+        enabled = get_setting_value(session, key, default=True)
         # Coerce to bool (might come back as string "true"/"false")
         if isinstance(enabled, str):
             enabled = enabled.lower() not in ("false", "0", "no")
@@ -225,7 +263,7 @@ def toggle_data_sources(
     toggles: list[DataSourceToggle],
     session: Session = Depends(get_session),
     engine: Engine = Depends(get_engine),
-    admin: dict = Depends(get_current_admin),
+    admin: dict = Depends(rate_limited_admin),
 ):
     """Enable or disable one or more data source types."""
     from synapse.services import settings_service
@@ -251,14 +289,14 @@ def toggle_data_sources(
 @router.get("/health", response_model=HealthResponse)
 def event_lake_health(
     session: Session = Depends(get_session),
-    admin: dict = Depends(get_current_admin),  # noqa: ARG001
+    admin: dict = Depends(rate_limited_admin),  # noqa: ARG001
     days: int = Query(30, ge=1, le=365, description="Days of daily volume history"),
 ):
     """Return Event Lake health stats for the admin dashboard."""
     from synapse.services.retention_service import get_retention_stats
 
     engine = session.get_bind()
-    stats = get_retention_stats(engine)
+    stats = get_retention_stats(engine)  # type: ignore[arg-type]
 
     # Events today
     today_start = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
@@ -321,19 +359,19 @@ def event_lake_health(
 @router.get("/storage-estimate", response_model=StorageEstimate)
 def storage_estimate(
     session: Session = Depends(get_session),
-    admin: dict = Depends(get_current_admin),  # noqa: ARG001
+    admin: dict = Depends(rate_limited_admin),  # noqa: ARG001
 ):
     """Return a storage estimate based on current data volume.
 
     Reference: §3B.5 — ~340 bytes per row average.
     """
-    AVG_ROW_BYTES = 340  # from design doc estimates
+    avg_row_bytes = 340  # from design doc estimates
 
     total_rows = session.scalar(
         select(func.count()).select_from(EventLake)
     ) or 0
 
-    estimated_bytes = total_rows * AVG_ROW_BYTES
+    estimated_bytes = total_rows * avg_row_bytes
 
     # Calculate days of data for daily rate projection
     oldest = session.scalar(select(func.min(EventLake.timestamp)))
@@ -345,10 +383,10 @@ def storage_estimate(
         days_of_data = 1
 
     daily_rate = total_rows / days_of_data
-    projected_90d_bytes = daily_rate * 90 * AVG_ROW_BYTES
+    projected_90d_bytes = daily_rate * 90 * avg_row_bytes
 
     return StorageEstimate(
-        avg_row_bytes=AVG_ROW_BYTES,
+        avg_row_bytes=avg_row_bytes,
         total_rows=total_rows,
         estimated_bytes=estimated_bytes,
         estimated_mb=round(estimated_bytes / (1024 * 1024), 2),
@@ -365,7 +403,7 @@ def storage_estimate(
 @router.post("/retention/run", response_model=RetentionResult)
 def trigger_retention(
     engine: Engine = Depends(get_engine),
-    admin: dict = Depends(get_current_admin),  # noqa: ARG001
+    admin: dict = Depends(rate_limited_admin),  # noqa: ARG001
     retention_days: int = Query(90, ge=1, le=730),
 ):
     """Manually trigger Event Lake retention cleanup."""
@@ -378,7 +416,7 @@ def trigger_retention(
 @router.post("/reconciliation/run", response_model=ReconciliationResult)
 def trigger_reconciliation(
     engine: Engine = Depends(get_engine),
-    admin: dict = Depends(get_current_admin),  # noqa: ARG001
+    admin: dict = Depends(rate_limited_admin),  # noqa: ARG001
 ):
     """Manually trigger counter reconciliation."""
     from synapse.services.reconciliation_service import reconcile_counters
@@ -389,7 +427,7 @@ def trigger_reconciliation(
 @router.post("/backfill/run", response_model=BackfillResult)
 def trigger_backfill(
     engine: Engine = Depends(get_engine),
-    admin: dict = Depends(get_current_admin),  # noqa: ARG001
+    admin: dict = Depends(rate_limited_admin),  # noqa: ARG001
     dry_run: bool = Query(False, description="Preview without writing"),
 ):
     """Trigger activity_log → event_counters backfill."""
@@ -404,7 +442,7 @@ def trigger_backfill(
 @router.get("/counters")
 def list_counters(
     session: Session = Depends(get_session),
-    admin: dict = Depends(get_current_admin),  # noqa: ARG001
+    admin: dict = Depends(rate_limited_admin),  # noqa: ARG001
     user_id: int | None = Query(None),
     event_type: str | None = Query(None),
     period: str = Query("lifetime"),
@@ -435,7 +473,7 @@ def list_counters(
             {
                 "user_id": str(c.user_id),
                 "event_type": c.event_type,
-                "zone_id": c.zone_id,
+                "category_id": c.category_id,
                 "period": c.period,
                 "count": c.count,
             }

@@ -1,24 +1,42 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { api, type ActivityEvent, type ActivityResponse } from '$lib/api';
+	import { api, type ActivityEvent, type ActivityResponse, type PageLayout } from '$lib/api';
 	import Avatar from '$lib/components/Avatar.svelte';
 	import EmptyState from '$lib/components/EmptyState.svelte';
 	import { timeAgo, eventTypeLabel, eventColor, fmt } from '$lib/utils';
-	import { Chart, registerables } from 'chart.js';
+	import {
+		Chart,
+		BarController,
+		BarElement,
+		CategoryScale,
+		LinearScale,
+		Tooltip,
+		Legend,
+	} from 'chart.js';
 	import SynapseLoader from '$lib/components/SynapseLoader.svelte';
-	import { primaryCurrency } from '$lib/stores/currency';
+	import EditableCard from '$lib/components/EditableCard.svelte';
+	import CardPropertyPanel from '$lib/components/CardPropertyPanel.svelte';
+	import { editMode } from '$lib/stores/editMode.svelte';
+	import { siteSettings } from '$lib/stores/siteSettings.svelte';
+	import { currency } from '$lib/stores/currency.svelte';
+	import { ACTIVITY_DAY_OPTIONS } from '$lib/constants';
 
-	Chart.register(...registerables);
+	Chart.register(BarController, BarElement, CategoryScale, LinearScale, Tooltip, Legend);
 
 	let days = $state(30);
 	let data = $state<ActivityResponse | null>(null);
+	let layout = $state<PageLayout | null>(null);
 	let loading = $state(true);
 	let chartCanvas = $state<HTMLCanvasElement | null>(null);
 	let chart: Chart | null = null;
 	let eventFilter = $state('');
 	let allEventTypes = $state<string[]>([]);
 
-	const DAY_OPTIONS = [7, 14, 30, 90];
+	let isEditing = $derived(editMode.canEdit);
+
+	let heading = $derived(siteSettings.pageTitle('activity', 'Activity'));
+
+	
 
 	async function load() {
 		loading = true;
@@ -35,7 +53,10 @@
 		}
 	}
 
-	onMount(load);
+	onMount(() => {
+		api.getLayout('activity').then((l) => (layout = l)).catch(() => null);
+		load();
+	});
 
 	function changeDays(d: number) {
 		days = d;
@@ -47,7 +68,7 @@
 		load();
 	}
 
-	// Build chart when data changes — force full destroy + recreate
+	// Build chart when data changes — full destroy + recreate with proper cleanup
 	$effect(() => {
 		if (!data?.daily || !chartCanvas) return;
 
@@ -109,19 +130,32 @@
 				},
 			},
 		});
+
+		// Cleanup: destroy the chart when the effect re-runs or the component unmounts
+		return () => {
+			if (chart) { chart.destroy(); chart = null; }
+		};
 	});
+
+	let sortedCards = $derived(
+		layout?.cards
+			?.filter((c) => isEditing || c.visible)
+			.sort((a, b) => a.position - b.position) ?? []
+	);
+	let wrapCard = $derived(sortedCards.find((c) => c.card_type === 'activity_feed'));
 </script>
 
-<svelte:head><title>Activity — Synapse</title></svelte:head>
+<svelte:head><title>{heading} — Synapse</title></svelte:head>
 
+{#snippet pageContent()}
 <div class="mb-6">
-	<h1 class="text-2xl font-bold text-white">Activity</h1>
+	<h1 class="text-2xl font-bold text-white">{heading}</h1>
 	<p class="text-sm text-zinc-500 mt-1">Track engagement across the community.</p>
 </div>
 
 <!-- Controls -->
 <div class="flex flex-wrap gap-2 mb-6">
-	{#each DAY_OPTIONS as d}
+	{#each ACTIVITY_DAY_OPTIONS as d}
 		<button
 			class="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors
 				{days === d
@@ -156,7 +190,7 @@
 		<SynapseLoader text="Loading activity..." />
 	</div>
 {:else if !data || data.events.length === 0}
-	<EmptyState icon="⚡" title="No activity yet" description="Events will stream in once the bot processes interactions." />
+	<EmptyState title="No activity yet" description="Events will stream in once the bot processes interactions." />
 {:else}
 	<!-- Chart -->
 	<div class="card mb-6">
@@ -184,7 +218,7 @@
 							</span>
 						</div>
 						{#if event.xp_delta > 0}
-						<span class="text-xs text-brand-400">+{event.xp_delta} {$primaryCurrency}</span>
+						<span class="text-xs text-brand-400">+{event.xp_delta} {currency.primary}</span>
 						{/if}
 					</div>
 					<span class="text-xs text-zinc-500 whitespace-nowrap">{timeAgo(event.timestamp)}</span>
@@ -192,4 +226,14 @@
 			{/each}
 		</div>
 	</div>
+{/if}
+{/snippet}
+
+{#if wrapCard}
+<EditableCard card={wrapCard} showTitles={false}>
+	{@render pageContent()}
+</EditableCard>
+<CardPropertyPanel cards={sortedCards} />
+{:else}
+{@render pageContent()}
 {/if}

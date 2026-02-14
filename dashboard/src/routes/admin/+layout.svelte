@@ -1,58 +1,39 @@
 <script lang="ts">
-	import { auth, isAdmin } from '$lib/stores/auth';
+	import { auth } from '$lib/stores/auth.svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 	import { api } from '$lib/api';
 
 	let { children } = $props();
 	let checking = $state(true);
-	let setupChecked = $state(false);
+	let setupNeeded = $state(false);
 
-	// Use $effect instead of onMount to reactively track auth.loading.
-	// This avoids the race condition where auth finishes loading before
-	// the admin layout mounts, which left `checking` stuck as true.
+	// Unblock the guard whenever auth finishes loading.
 	$effect(() => {
-		let loading = false;
-		const unsub = auth.loading.subscribe((v) => { loading = v; });
-		unsub(); // read current value synchronously
-
-		if (!loading) {
+		if (!auth.loading) {
 			checking = false;
 			checkSetup();
 		}
 	});
 
 	async function checkSetup() {
-		// Skip setup gate if we're already on the setup page
-		if ($page.url.pathname.startsWith('/admin/setup')) {
-			setupChecked = true;
-			return;
-		}
-		if (!$isAdmin) {
-			setupChecked = true;
-			return;
-		}
+		if (!auth.isAdmin) return;
 		try {
 			const status = await api.admin.getSetupStatus();
-			if (!status.initialized) {
-				setupChecked = true;
-				goto('/admin/setup');
-				return;
-			}
+			setupNeeded = !status.initialized;
 		} catch {
-			// If setup status fails, let admin through (endpoint may not exist yet)
+			// If setup status fails, assume OK
 		}
-		setupChecked = true;
 	}
 </script>
 
-{#if checking || !setupChecked}
+{#if checking}
 	<div class="flex items-center justify-center h-64">
 		<div class="w-8 h-8 border-2 border-brand-500 border-t-transparent rounded-full animate-spin"></div>
 	</div>
-{:else if !$isAdmin}
+{:else if !auth.isAdmin}
 	<div class="flex flex-col items-center justify-center h-64 text-center">
-		<span class="text-5xl mb-4">🔒</span>
+		
 		<h2 class="text-xl font-bold text-white mb-2">Admin Access Required</h2>
 		<p class="text-sm text-zinc-500 mb-6 max-w-md">
 			You need to sign in with a Discord account that has the admin role to access this section.
@@ -62,5 +43,19 @@
 		</a>
 	</div>
 {:else}
+	{#if setupNeeded}
+		<div class="mx-8 mt-6 mb-0 px-4 py-3 rounded-lg bg-amber-500/10 border border-amber-500/30 flex items-center justify-between">
+			<div class="flex items-center gap-3">
+				<span class="text-amber-400 text-lg">⚠</span>
+				<div>
+					<p class="text-sm font-medium text-amber-200">Setup not complete</p>
+					<p class="text-xs text-amber-400/70">Run the bootstrap to initialize layouts, seasons, and channel sync.</p>
+				</div>
+			</div>
+			<a href="/admin/settings?tab=setup" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 transition-colors">
+				Go to Setup
+			</a>
+		</div>
+	{/if}
 	{@render children()}
 {/if}

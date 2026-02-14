@@ -14,25 +14,15 @@ from __future__ import annotations
 
 import jwt
 import pytest
-from fastapi.testclient import TestClient
 
 from synapse.api.deps import JWT_ALGORITHM, JWT_SECRET
 
-
-@pytest.fixture
-def client():
-    """Create a FastAPI TestClient."""
-    from synapse.api.main import app
-    return TestClient(app, raise_server_exceptions=False)
+from conftest import make_admin_token
 
 
 @pytest.fixture
 def admin_token():
-    return jwt.encode(
-        {"sub": "12345", "username": "TestAdmin", "is_admin": True},
-        JWT_SECRET,
-        algorithm=JWT_ALGORITHM,
-    )
+    return make_admin_token(sub="12345", username="TestAdmin")
 
 
 @pytest.fixture
@@ -55,7 +45,8 @@ class TestHealthEndpoint:
     def test_health_returns_ok(self, client):
         resp = client.get("/api/health")
         assert resp.status_code == 200
-        assert resp.json() == {"status": "ok"}
+        data = resp.json()
+        assert data["status"] == "ok"
 
 
 # ===========================================================================
@@ -65,7 +56,9 @@ class TestAdminAuthGuards:
     """All admin endpoints must return 401/403 for missing/invalid/non-admin tokens."""
 
     ADMIN_GET_ENDPOINTS = [
-        "/api/admin/zones",
+        "/api/admin/channel-defaults",
+        "/api/admin/channel-overrides",
+        "/api/admin/channels",
         "/api/admin/achievements",
         "/api/admin/settings",
         "/api/admin/audit",
@@ -73,8 +66,17 @@ class TestAdminAuthGuards:
     ]
 
     ADMIN_POST_ENDPOINTS = [
-        "/api/admin/zones",
         "/api/admin/achievements",
+        "/api/admin/channels/sync",
+    ]
+
+    ADMIN_PATCH_ENDPOINTS = [
+        "/api/admin/achievements/1",
+    ]
+
+    ADMIN_DELETE_ENDPOINTS = [
+        "/api/admin/channel-defaults/1",
+        "/api/admin/channel-overrides/1",
     ]
 
     @pytest.mark.parametrize("endpoint", ADMIN_GET_ENDPOINTS)
@@ -86,6 +88,16 @@ class TestAdminAuthGuards:
     def test_post_rejects_no_auth(self, client, endpoint):
         resp = client.post(endpoint, json={})
         assert resp.status_code in (401, 403, 422)
+
+    @pytest.mark.parametrize("endpoint", ADMIN_PATCH_ENDPOINTS)
+    def test_patch_rejects_no_auth(self, client, endpoint):
+        resp = client.patch(endpoint, json={})
+        assert resp.status_code in (401, 403, 422)
+
+    @pytest.mark.parametrize("endpoint", ADMIN_DELETE_ENDPOINTS)
+    def test_delete_rejects_no_auth(self, client, endpoint):
+        resp = client.delete(endpoint)
+        assert resp.status_code in (401, 403)
 
     @pytest.mark.parametrize("endpoint", ADMIN_GET_ENDPOINTS)
     def test_get_rejects_invalid_token(self, client, endpoint):

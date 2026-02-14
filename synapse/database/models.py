@@ -9,12 +9,14 @@ Tables:
 - user_stats         — Per-season engagement counters
 - seasons            — Competitive windows
 - activity_log       — Append-only event journal with idempotent insert
-- zones              — Channel groupings
-- zone_channels      — Zone <> Channel mapping
-- zone_multipliers   — Per-zone, per-event-type weights
-- achievement_templates — Admin-defined recognition
+- channels           — Persistent Discord channel metadata
+- channel_type_defaults — Server-wide reward multipliers per channel type
+- channel_overrides  — Per-channel reward multiplier exceptions
+- achievement_categories — Per-guild achievement category taxonomy
+- achievement_rarities — Per-guild achievement rarity tiers
+- achievement_series — Progression chains grouping achievement tiers
+- achievement_templates — Admin-defined recognition with typed triggers
 - user_achievements  — Earned badges
-- quests             — Gamified tasks
 - admin_log          — Append-only audit trail
 - user_preferences   — Per-user notification opt-outs
 """
@@ -59,7 +61,6 @@ class InteractionType(enum.StrEnum):
     REACTION_RECEIVED = "REACTION_RECEIVED"
     THREAD_CREATE = "THREAD_CREATE"
     VOICE_TICK = "VOICE_TICK"
-    QUEST_COMPLETE = "QUEST_COMPLETE"
     MANUAL_AWARD = "MANUAL_AWARD"
     LEVEL_UP = "LEVEL_UP"
     ACHIEVEMENT_EARNED = "ACHIEVEMENT_EARNED"
@@ -67,11 +68,18 @@ class InteractionType(enum.StrEnum):
     VOICE_LEAVE = "VOICE_LEAVE"
 
 
-class QuestStatus(enum.StrEnum):
-    """Lifecycle states for a Quest."""
-    OPEN = "open"
-    CLAIMED = "claimed"
-    COMPLETE = "complete"
+class TriggerType(enum.StrEnum):
+    """Defines what condition causes an achievement to be checked."""
+    STAT_THRESHOLD = "stat_threshold"
+    XP_MILESTONE = "xp_milestone"
+    STAR_MILESTONE = "star_milestone"
+    LEVEL_REACHED = "level_reached"
+    LEVEL_INTERVAL = "level_interval"
+    EVENT_COUNT = "event_count"
+    FIRST_EVENT = "first_event"
+    MEMBER_TENURE = "member_tenure"
+    INVITE_COUNT = "invite_count"
+    MANUAL = "manual"
 
 
 class AdminActionType(enum.StrEnum):
@@ -175,79 +183,100 @@ class UserStats(Base):
 
 
 # ---------------------------------------------------------------------------
-# Zones — channel groupings
+# Channels — persistent Discord channel metadata
 # ---------------------------------------------------------------------------
-class Zone(Base):
-    __tablename__ = "zones"
+class Channel(Base):
+    """Stores Discord channel metadata synced from the guild snapshot.
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    Provides persistent channel names, types, and parent category info so the
+    dashboard can display rich channel information without the bot being online.
+    """
+    __tablename__ = "channels"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)  # Discord snowflake
     guild_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
-    description: Mapped[str | None] = mapped_column(Text, default=None)
-    created_by: Mapped[int | None] = mapped_column(BigInteger, default=None)
-    active: Mapped[bool] = mapped_column(Boolean, default=True)
-    created_at: Mapped[datetime] = mapped_column(
+    type: Mapped[str] = mapped_column(String(20), nullable=False)  # text, voice, forum, stage, announcement, category
+    discord_category_id: Mapped[int | None] = mapped_column(BigInteger, default=None)
+    discord_category_name: Mapped[str | None] = mapped_column(String(100), default=None)
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    last_synced_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
 
-    channels: Mapped[list[ZoneChannel]] = relationship(
-        back_populates="zone", cascade="all, delete-orphan"
-    )
-    multipliers: Mapped[list[ZoneMultiplier]] = relationship(
-        back_populates="zone", cascade="all, delete-orphan"
-    )
-
     __table_args__ = (
-        UniqueConstraint("guild_id", "name", name="uq_zones_guild_name"),
+        Index("ix_channels_guild_id", "guild_id"),
     )
 
     def __repr__(self) -> str:
-        return f"<Zone id={self.id} name={self.name!r}>"
+        return f"<Channel id={self.id} name={self.name!r} type={self.type!r}>"
 
 
 # ---------------------------------------------------------------------------
-# ZoneChannels — zone <> channel mapping
+# ChannelTypeDefault — server-wide reward multipliers per channel type
 # ---------------------------------------------------------------------------
-class ZoneChannel(Base):
-    __tablename__ = "zone_channels"
+class ChannelTypeDefault(Base):
+    """Server-wide reward multipliers per channel type.
 
-    zone_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("zones.id", ondelete="CASCADE"), primary_key=True
-    )
-    channel_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-
-    zone: Mapped[Zone] = relationship(back_populates="channels")
-
-    __table_args__ = (
-        Index("ix_zone_channels_channel_id", "channel_id"),
-    )
-
-    def __repr__(self) -> str:
-        return f"<ZoneChannel zone={self.zone_id} channel={self.channel_id}>"
-
-
-# ---------------------------------------------------------------------------
-# ZoneMultipliers — per-zone, per-event-type weights
-# ---------------------------------------------------------------------------
-class ZoneMultiplier(Base):
-    __tablename__ = "zone_multipliers"
+    Every channel inherits these defaults based on its type (text, voice,
+    forum, stage, announcement).  Admins configure once per type.
+    """
+    __tablename__ = "channel_type_defaults"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    zone_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("zones.id", ondelete="CASCADE"), nullable=False
-    )
-    interaction_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    guild_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    channel_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(50), nullable=False)
     xp_multiplier: Mapped[float] = mapped_column(Float, default=1.0)
     star_multiplier: Mapped[float] = mapped_column(Float, default=1.0)
 
-    zone: Mapped[Zone] = relationship(back_populates="multipliers")
-
     __table_args__ = (
-        UniqueConstraint("zone_id", "interaction_type", name="uq_zone_mult_zone_type"),
+        UniqueConstraint(
+            "guild_id", "channel_type", "event_type",
+            name="uq_type_defaults_guild_type_event",
+        ),
+        Index("ix_type_defaults_guild", "guild_id"),
     )
 
     def __repr__(self) -> str:
-        return f"<ZoneMultiplier zone={self.zone_id} type={self.interaction_type}>"
+        return (
+            f"<ChannelTypeDefault guild={self.guild_id} "
+            f"type={self.channel_type!r} event={self.event_type!r}>"
+        )
+
+
+# ---------------------------------------------------------------------------
+# ChannelOverride — per-channel reward multiplier exceptions
+# ---------------------------------------------------------------------------
+class ChannelOverride(Base):
+    """Per-channel reward multiplier overrides.
+
+    For specific channels that need different rules than their type default.
+    Takes precedence over ChannelTypeDefault.
+    """
+    __tablename__ = "channel_overrides"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    guild_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    channel_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    event_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    xp_multiplier: Mapped[float] = mapped_column(Float, default=1.0)
+    star_multiplier: Mapped[float] = mapped_column(Float, default=1.0)
+    reason: Mapped[str | None] = mapped_column(Text, default=None)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "guild_id", "channel_id", "event_type",
+            name="uq_overrides_guild_channel_event",
+        ),
+        Index("ix_overrides_channel", "channel_id"),
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<ChannelOverride guild={self.guild_id} "
+            f"channel={self.channel_id} event={self.event_type!r}>"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -263,9 +292,6 @@ class ActivityLog(Base):
     event_type: Mapped[str] = mapped_column(String(50), nullable=False)
     season_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("seasons.id", ondelete="SET NULL"), nullable=True
-    )
-    zone_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("zones.id", ondelete="SET NULL"), nullable=True
     )
     source_system: Mapped[str] = mapped_column(
         String(30), nullable=False, default="discord"
@@ -292,7 +318,6 @@ class ActivityLog(Base):
         Index("ix_activity_log_user_time", "user_id", "timestamp"),
         Index("ix_activity_log_timestamp", "timestamp"),
         Index("ix_activity_log_event_time", "event_type", "timestamp"),
-        Index("ix_activity_log_zone_time", "zone_id", "timestamp"),
     )
 
     def __repr__(self) -> str:
@@ -300,7 +325,71 @@ class ActivityLog(Base):
 
 
 # ---------------------------------------------------------------------------
-# AchievementTemplate — admin-defined recognition
+# AchievementCategory — per-guild achievement category taxonomy
+# ---------------------------------------------------------------------------
+class AchievementCategory(Base):
+    __tablename__ = "achievement_categories"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    guild_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    name: Mapped[str] = mapped_column(String(50), nullable=False)
+    icon: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+
+    __table_args__ = (
+        UniqueConstraint("guild_id", "name", name="uq_achiev_categories_guild_name"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<AchievementCategory id={self.id} name={self.name!r}>"
+
+
+# ---------------------------------------------------------------------------
+# AchievementRarity — per-guild achievement rarity tiers
+# ---------------------------------------------------------------------------
+class AchievementRarity(Base):
+    __tablename__ = "achievement_rarities"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    guild_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    name: Mapped[str] = mapped_column(String(50), nullable=False)
+    color: Mapped[str] = mapped_column(String(7), nullable=False, default="#9e9e9e")
+    emoji: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+
+    __table_args__ = (
+        UniqueConstraint("guild_id", "name", name="uq_achiev_rarities_guild_name"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<AchievementRarity id={self.id} name={self.name!r}>"
+
+
+# ---------------------------------------------------------------------------
+# AchievementSeries — progression chains grouping achievement tiers
+# ---------------------------------------------------------------------------
+class AchievementSeries(Base):
+    __tablename__ = "achievement_series"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    guild_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, default=None)
+
+    tiers: Mapped[list[AchievementTemplate]] = relationship(
+        back_populates="series", order_by="AchievementTemplate.series_order"
+    )
+
+    __table_args__ = (
+        UniqueConstraint("guild_id", "name", name="uq_achiev_series_guild_name"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<AchievementSeries id={self.id} name={self.name!r}>"
+
+
+# ---------------------------------------------------------------------------
+# AchievementTemplate — admin-defined recognition with typed triggers
 # ---------------------------------------------------------------------------
 class AchievementTemplate(Base):
     __tablename__ = "achievement_templates"
@@ -309,21 +398,50 @@ class AchievementTemplate(Base):
     guild_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, default=None)
-    category: Mapped[str] = mapped_column(String(50), nullable=False, default="social")
-    requirement_type: Mapped[str] = mapped_column(String(50), nullable=False)
-    requirement_scope: Mapped[str] = mapped_column(String(20), default="season")
-    requirement_field: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    requirement_value: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # Category & rarity — FK to per-guild customisable tables
+    category_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("achievement_categories.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    rarity_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("achievement_rarities.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    # Trigger system — replaces requirement_type/field/value/scope
+    trigger_type: Mapped[str] = mapped_column(
+        String(30), nullable=False, default=TriggerType.MANUAL.value,
+    )
+    trigger_config: Mapped[dict | None] = mapped_column(JSONB, default=dict)
+
+    # Series / progression
+    series_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("achievement_series.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    series_order: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # Rewards
     xp_reward: Mapped[int] = mapped_column(Integer, default=0)
     gold_reward: Mapped[int] = mapped_column(Integer, default=0)
-    badge_image_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    rarity: Mapped[str] = mapped_column(String(20), default="common")
+
+    # Badge image — URL or local path (data/badges/{guild_id}/filename)
+    badge_image: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+    # Controls
     announce_channel_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    is_hidden: Mapped[bool] = mapped_column(Boolean, default=False)
+    max_earners: Mapped[int | None] = mapped_column(Integer, nullable=True)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
 
+    # Relationships
+    category: Mapped[AchievementCategory | None] = relationship()
+    rarity: Mapped[AchievementRarity | None] = relationship()
+    series: Mapped[AchievementSeries | None] = relationship(back_populates="tiers")
     earned_by: Mapped[list[UserAchievement]] = relationship(back_populates="template")
 
     __table_args__ = (
@@ -357,31 +475,6 @@ class UserAchievement(Base):
 
     def __repr__(self) -> str:
         return f"<UserAchievement user={self.user_id} achievement={self.achievement_id}>"
-
-
-# ---------------------------------------------------------------------------
-# Quest — gamified tasks
-# ---------------------------------------------------------------------------
-class Quest(Base):
-    __tablename__ = "quests"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    guild_id: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
-    title: Mapped[str] = mapped_column(String(200), nullable=False)
-    description: Mapped[str | None] = mapped_column(Text, default=None)
-    xp_reward: Mapped[int] = mapped_column(Integer, default=50)
-    gold_reward: Mapped[int] = mapped_column(Integer, default=0)
-    status: Mapped[QuestStatus] = mapped_column(
-        Enum(QuestStatus, name="quest_status_enum"), default=QuestStatus.OPEN
-    )
-    github_issue_url: Mapped[str | None] = mapped_column(String(500), default=None)
-    active: Mapped[bool] = mapped_column(Boolean, default=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
-
-    def __repr__(self) -> str:
-        return f"<Quest id={self.id} title={self.title!r}>"
 
 
 # ---------------------------------------------------------------------------
@@ -464,6 +557,78 @@ class Setting(Base):
 
 
 # ---------------------------------------------------------------------------
+# OAuthState — one-time CSRF tokens for OAuth callback validation
+# ---------------------------------------------------------------------------
+class OAuthState(Base):
+    __tablename__ = "oauth_states"
+
+    state: Mapped[str] = mapped_column(String(128), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        Index("ix_oauth_states_created_at", "created_at"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<OAuthState state={self.state[:8]!r}...>"
+
+
+# ---------------------------------------------------------------------------
+# MediaFile — uploaded images for use across the system
+# ---------------------------------------------------------------------------
+class MediaFile(Base):
+    """Uploaded image stored on disk, referenced by URL path.
+
+    Provides a central media library so admins can upload images once
+    and reference them from achievements, cards, or any future feature.
+    """
+    __tablename__ = "media_files"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    guild_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    original_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    url: Mapped[str] = mapped_column(String(500), nullable=False, unique=True)
+    content_type: Mapped[str | None] = mapped_column(String(100), default=None)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    alt_text: Mapped[str | None] = mapped_column(String(200), default=None)
+    uploaded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    uploaded_by: Mapped[int | None] = mapped_column(BigInteger, default=None)
+
+    __table_args__ = (
+        Index("ix_media_files_guild_id", "guild_id"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<MediaFile id={self.id} filename={self.filename!r}>"
+
+
+# ---------------------------------------------------------------------------
+# AdminRateLimitEvent — durable mutation events for admin throttling
+# ---------------------------------------------------------------------------
+class AdminRateLimitEvent(Base):
+    __tablename__ = "admin_rate_limit_events"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    admin_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    timestamp: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        Index("ix_admin_rate_limit_admin_ts", "admin_id", timestamp.desc()),
+        Index("ix_admin_rate_limit_ts", "timestamp"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<AdminRateLimitEvent admin={self.admin_id!r} ts={self.timestamp}>"
+
+
+# ---------------------------------------------------------------------------
 # EventLake — append-only ephemeral event capture (P4)
 # ---------------------------------------------------------------------------
 class EventLake(Base):
@@ -522,12 +687,82 @@ class EventCounter(Base):
 
     user_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     event_type: Mapped[str] = mapped_column(String(64), primary_key=True)
-    zone_id: Mapped[int] = mapped_column(Integer, primary_key=True, default=0)
     period: Mapped[str] = mapped_column(String(16), primary_key=True)
     count: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
 
     def __repr__(self) -> str:
         return (
             f"<EventCounter user={self.user_id} type={self.event_type!r} "
-            f"zone={self.zone_id} period={self.period!r} count={self.count}>"
+            f"period={self.period!r} count={self.count}>"
         )
+
+
+# ---------------------------------------------------------------------------
+# PageLayout — per-page layout configuration
+# ---------------------------------------------------------------------------
+class PageLayout(Base):
+    """Stores the layout configuration for a dashboard page.
+
+    Each page (dashboard, leaderboard, activity, achievements) gets a
+    PageLayout row that holds the ordered list of cards and grid positions.
+    The ``display_name`` is what appears in the sidebar navigation and can
+    be customised by admins in edit mode.
+    """
+    __tablename__ = "page_layouts"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    guild_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    page_slug: Mapped[str] = mapped_column(String(50), nullable=False)
+    display_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    layout_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    updated_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    cards: Mapped[list[CardConfig]] = relationship(
+        back_populates="page_layout", cascade="all, delete-orphan",
+        order_by="CardConfig.position",
+    )
+
+    __table_args__ = (
+        UniqueConstraint("guild_id", "page_slug", name="uq_page_layouts_guild_slug"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<PageLayout id={self.id} slug={self.page_slug!r}>"
+
+
+# ---------------------------------------------------------------------------
+# CardConfig — per-card visual and content configuration
+# ---------------------------------------------------------------------------
+class CardConfig(Base):
+    """Per-card visual and content configuration within a page layout.
+
+    Each card occupies a position in the parent page's grid layout.
+    ``card_type`` determines the component rendered; ``config_json`` stores
+    type-specific settings (background colour, image URL, icon, data source,
+    stat selection, etc.).
+    """
+    __tablename__ = "card_configs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    page_layout_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("page_layouts.id", ondelete="CASCADE"), nullable=False
+    )
+    card_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    grid_span: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    title: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    subtitle: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    config_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    visible: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    page_layout: Mapped[PageLayout] = relationship(back_populates="cards")
+
+    __table_args__ = (
+        Index("ix_card_configs_page_layout", "page_layout_id", "position"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<CardConfig id={self.id} type={self.card_type!r} pos={self.position}>"

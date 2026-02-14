@@ -40,7 +40,6 @@ from collections.abc import Callable
 from contextlib import contextmanager
 from typing import ParamSpec, TypeVar
 
-from dotenv import load_dotenv
 from sqlalchemy import Engine, create_engine
 from sqlalchemy.orm import Session
 
@@ -61,6 +60,8 @@ def create_db_engine() -> Engine:
     The connection pool is sized for a small-to-medium community bot:
     * ``pool_size=5`` — five persistent connections.
     * ``max_overflow=10`` — up to 10 extra connections under load.
+    * ``pool_timeout=10`` — fail after 10 s if no connection is available.
+    * ``pool_recycle=3600`` — recycle connections after 1 hour.
 
     Returns
     -------
@@ -72,7 +73,6 @@ def create_db_engine() -> Engine:
     RuntimeError
         If ``DATABASE_URL`` is not set.
     """
-    load_dotenv()
     url = os.getenv("DATABASE_URL")
     if not url:
         raise RuntimeError(
@@ -85,7 +85,9 @@ def create_db_engine() -> Engine:
         echo=False,        # Set True for SQL debugging
         pool_size=5,
         max_overflow=10,
-        pool_pre_ping=True,  # Reconnect stale connections automatically
+        pool_pre_ping=True,   # Reconnect stale connections automatically
+        pool_timeout=10,      # Fail after 10s instead of hanging forever
+        pool_recycle=3600,    # Recycle connections after 1 hour
     )
     logger.info("Database engine created → %s", engine.url.host)
     return engine
@@ -98,10 +100,23 @@ def init_db(engine: Engine) -> None:
     """Create all tables defined in :mod:`synapse.database.models`.
 
     This is safe to call on every startup — ``CREATE TABLE IF NOT EXISTS``
-    under the hood.  For production schema migrations, add Alembic later.
+    under the hood.  After creating tables, seeds default settings so the
+    dashboard is immediately usable (economy, anti-gaming, quality, display,
+    announcements).  Seeding is idempotent — only inserts keys that don't
+    already exist.
+
+    .. note::
+
+        In production the schema is managed by Alembic (``alembic upgrade
+        head``).  ``create_all`` is retained as a safety net for dev/test
+        environments where Alembic may not have run.
     """
     Base.metadata.create_all(engine)
     logger.info("Database tables verified / created.")
+
+    from synapse.database.seed import seed_default_settings
+
+    seed_default_settings(engine)
 
 
 # ---------------------------------------------------------------------------

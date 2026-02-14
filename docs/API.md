@@ -13,7 +13,7 @@ Admin endpoints require a `Bearer` token in the `Authorization` header. The toke
 Validated at API startup. The API **will not start** if the secret is:
 - Missing or blank
 - Shorter than 32 characters
-- A known-weak value (`change-me`, `secret`, `synapse-secret`, `your-secret-here`, `jwt-secret`)
+- A known-weak value (`synapse-dev-secret-change-me`, `change-me`, `secret`, `dev`)
 
 ## Rate Limiting
 
@@ -21,7 +21,7 @@ Admin mutation endpoints (POST/PUT/PATCH/DELETE under `/api/admin`) are rate-lim
 
 - **Window:** 60 seconds (sliding)
 - **Limit:** 30 mutations per window
-- **Scope:** Keyed by JWT `sub` claim (admin Discord ID)
+- **Scope:** Keyed by JWT `sub` claim (admin Discord ID), backed by durable DB events
 - **Counting:** Only successful mutations (status < 400) are counted
 - **Response headers:** `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`
 - **429 body:** `{"detail": {"error": "rate_limit_exceeded", "message": "...", "retry_after": N}}`
@@ -44,7 +44,7 @@ Bot heartbeat status.
 
 ### GET /auth/login
 
-Redirects to Discord OAuth2 consent screen. Sets an in-memory state token (10-minute TTL) for CSRF protection.
+Redirects to Discord OAuth2 consent screen. Persists a one-time state token (10-minute TTL) for CSRF protection.
 
 ### GET /auth/callback
 
@@ -165,13 +165,13 @@ Public-facing dashboard settings with defaults.
 
 All require JWT with `is_admin: true`.
 
-### GET /admin/zones
+### GET /admin/categories
 
-List all zones with their channel mappings and multipliers.
+List all categories with their channel mappings and multipliers.
 
-### POST /admin/zones
+### POST /admin/categories
 
-Create a zone.
+Create a category.
 
 **Body:**
 ```json
@@ -185,9 +185,9 @@ Create a zone.
 
 Multiplier format: `{event_type: [xp_multiplier, star_multiplier]}`.
 
-### PATCH /admin/zones/{zone_id}
+### PATCH /admin/categories/{category_id}
 
-Update a zone. Partial updates supported.
+Update a category. Partial updates supported.
 
 ### GET /admin/achievements
 
@@ -260,7 +260,11 @@ Returns bootstrap state: whether the guild is initialized, bootstrap version, ti
 
 ### POST /admin/setup/bootstrap
 
-Triggers first-run guild bootstrap. Creates zones from Discord categories, maps channels, creates a default season, writes default settings.
+Triggers first-run guild bootstrap. Creates categories from Discord categories, maps channels, creates a default season, writes default settings.
+
+**Query:** `allow_guild_mismatch` (default `false`).
+
+When `false`, bootstrap fails closed if the stored guild snapshot's `guild_id` does not match configured `guild_id`. Set `allow_guild_mismatch=true` to explicitly override.
 
 ### GET /admin/logs
 

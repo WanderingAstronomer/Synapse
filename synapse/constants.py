@@ -8,30 +8,15 @@ Import from here instead of duplicating in cogs, services, and dashboard.
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from synapse.engine.cache import ConfigCache
 
 # ---------------------------------------------------------------------------
-# Rarity presentation (used by bot embeds, dashboard, announcement service)
+# Rarity presentation (used by bot embeds, announcement service)
 # ---------------------------------------------------------------------------
-RARITY_COLORS_HEX: dict[str, str] = {
-    "common": "#9e9e9e",
-    "uncommon": "#4caf50",
-    "rare": "#2196f3",
-    "epic": "#9c27b0",
-    "legendary": "#ff9800",
-}
-
-RARITY_LABELS: dict[str, str] = {
-    "common": "Common",
-    "uncommon": "Uncommon",
-    "rare": "Rare",
-    "epic": "Epic",
-    "legendary": "Legendary",
-}
-
 RARITY_EMOJI: dict[str, str] = {
     "common": "\u26aa",        # ⚪
     "uncommon": "\U0001f7e2",  # 🟢
@@ -63,3 +48,25 @@ def xp_for_level(level: int, cache: ConfigCache | None = None) -> int:
         base = 100
         factor = 1.25
     return int(base * (factor ** level))
+
+# ---------------------------------------------------------------------------
+# Layout Service Allow Lists
+# ---------------------------------------------------------------------------
+ALLOWED_CARD_FIELDS: set[str] = {
+    "card_type", "position", "grid_span", "title",
+    "subtitle", "config_json", "visible",
+}
+
+
+# ---------------------------------------------------------------------------
+# Text processing helpers
+# ---------------------------------------------------------------------------
+_EMOJI_REGEX = re.compile(r"<a?:[a-zA-Z0-9_]+:[0-9]+>|(?<!\d):[a-zA-Z0-9_]+:(?!\d)")
+
+def count_emojis(text: str) -> int:
+    """Count custom emojis (<:name:id>) and shortcodes (:smile:) in text.
+
+    This is a heuristic for spam detection (quality.py) and lake metadata.
+    It does NOT count raw unicode emojis (requires heavy dependencies).
+    """
+    return len(_EMOJI_REGEX.findall(text))

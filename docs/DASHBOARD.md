@@ -28,7 +28,7 @@ All admin pages are nested under `routes/admin/+layout.svelte`, which provides:
 | Route | File | Description |
 |-------|------|-------------|
 | `/admin/setup` | `routes/admin/setup/+page.svelte` | First-run bootstrap wizard |
-| `/admin/zones` | `routes/admin/zones/+page.svelte` | Zone management — channels, multipliers |
+| `/admin/categories` | `routes/admin/categories/+page.svelte` | Category management — channels, multipliers |
 | `/admin/achievements` | `routes/admin/achievements/+page.svelte` | Achievement template builder |
 | `/admin/awards` | `routes/admin/awards/+page.svelte` | Manual XP/Gold/Achievement awards |
 | `/admin/settings` | `routes/admin/settings/+page.svelte` | Dashboard and economy settings editor |
@@ -120,7 +120,7 @@ Exports an `api` object with namespaced methods:
 
 - `api.getMetrics()`, `api.getLeaderboard()`, `api.getActivity()`, `api.getAchievements()`, `api.getRecentAchievements()`, `api.getPublicSettings()`
 - `api.auth.me()`, `api.auth.getLoginUrl()`
-- `api.admin.getZones()`, `api.admin.createZone()`, `api.admin.updateZone()`
+- `api.admin.getCategories()`, `api.admin.createCategory()`, `api.admin.updateCategory()`
 - `api.admin.getAchievements()`, `api.admin.createAchievement()`, `api.admin.updateAchievement()`
 - `api.admin.awardXpGold()`, `api.admin.grantAchievement()`
 - `api.admin.searchUsers()`, `api.admin.resolveNames()`

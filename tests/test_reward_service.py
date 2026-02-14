@@ -13,7 +13,6 @@ from datetime import datetime
 from unittest.mock import MagicMock
 
 import pytest
-from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from synapse.database.models import (
@@ -30,19 +29,16 @@ from synapse.services import reward_service
 
 
 @pytest.fixture
-def engine():
-    """In-memory SQLite engine with schema created."""
-    eng = create_engine("sqlite://", echo=False)
-    Base.metadata.create_all(eng)
-    return eng
+def engine(db_engine):
+    """Re-use the shared conftest db_engine (SQLite, StaticPool)."""
+    return db_engine
 
 
 @pytest.fixture
 def cache():
     """A mock ConfigCache with sensible defaults."""
     mock_cache = MagicMock(spec=ConfigCache)
-    mock_cache.get_zone_for_channel.return_value = None
-    mock_cache.get_multipliers.return_value = (1.0, 1.0)
+    mock_cache.resolve_multipliers.return_value = (1.0, 1.0)
     mock_cache.get_active_achievements.return_value = []
     mock_cache.get_int.return_value = 0
     mock_cache.get_float.return_value = 0.0

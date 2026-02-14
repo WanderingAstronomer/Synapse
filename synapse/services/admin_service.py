@@ -22,17 +22,23 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from synapse.database.models import (
+    AchievementCategory,
+    AchievementRarity,
+    AchievementSeries,
     AchievementTemplate,
     AdminLog,
+    ChannelOverride,
+    ChannelTypeDefault,
     Season,
-    Zone,
-    ZoneChannel,
-    ZoneMultiplier,
 )
-from synapse.engine.cache import send_notify
+from synapse.engine.cache import notify_before_commit
 
 logger = logging.getLogger(__name__)
 
+
+# ---------------------------------------------------------------------------
+# Generic audit helpers
+# ---------------------------------------------------------------------------
 
 def _row_to_dict(obj: Any) -> dict | None:
     """Convert a SQLAlchemy model instance to a JSON-serializable dict."""
@@ -72,221 +78,300 @@ def _log_admin_action(
     ))
 
 
-# ---------------------------------------------------------------------------
-# Zone CRUD
-# ---------------------------------------------------------------------------
-def create_zone(
+def _audited_create(
     engine,
+    row: Any,
     *,
-    guild_id: int,
-    name: str,
-    description: str | None = None,
-    channel_ids: list[int] | None = None,
-    multipliers: dict[str, tuple[float, float]] | None = None,
+    table_name: str,
     actor_id: int,
     ip_address: str | None = None,
-) -> Zone:
-    """Create a new zone with optional channels and multipliers."""
-    with Session(engine) as session:
-        zone = Zone(
-            guild_id=guild_id,
-            name=name,
-            description=description,
-            created_by=actor_id,
-        )
-        session.add(zone)
-        session.flush()  # Get zone.id
+) -> Any:
+    """Generic audited CREATE: add -> flush -> log -> notify -> commit -> return.
 
-        # Add channels
-        if channel_ids:
-            for ch_id in channel_ids:
-                session.add(ZoneChannel(zone_id=zone.id, channel_id=ch_id))
-
-        # Add multipliers
-        if multipliers:
-            for itype, (xp_m, star_m) in multipliers.items():
-                session.add(ZoneMultiplier(
-                    zone_id=zone.id,
-                    interaction_type=itype,
-                    xp_multiplier=xp_m,
-                    star_multiplier=star_m,
-                ))
-
+    Parameters
+    ----------
+    row : ORM instance (already constructed, not yet added to a session).
+    """
+    with Session(engine, expire_on_commit=False) as session:
+        session.add(row)
         session.flush()
-        after = _row_to_dict(zone)
         _log_admin_action(
             session,
             actor_id=actor_id,
             action_type="CREATE",
-            target_table="zones",
-            target_id=str(zone.id),
+            target_table=table_name,
+            target_id=str(row.id),
             before=None,
-            after=after,
+            after=_row_to_dict(row),
             ip_address=ip_address,
         )
+        notify_before_commit(session, table_name)
         session.commit()
-
-        # NOTIFY after commit
-        send_notify(engine, "zones")
-        send_notify(engine, "zone_channels")
-        if multipliers:
-            send_notify(engine, "zone_multipliers")
-
-        session.refresh(zone)
-        session.expunge(zone)
-        return zone
+        session.refresh(row)
+        session.expunge(row)
+        return row
 
 
-def update_zone(
+def _audited_update(
     engine,
+    model_cls: type,
+    pk: int,
     *,
-    zone_id: int,
-    name: str | None = None,
-    description: str | None = None,
-    active: bool | None = None,
-    channel_ids: list[int] | None = None,
-    multipliers: dict[str, tuple[float, float]] | None = None,
+    table_name: str,
     actor_id: int,
+    frozen_keys: tuple[str, ...] = ("id", "guild_id"),
     ip_address: str | None = None,
-) -> Zone | None:
-    """Update an existing zone."""
-    with Session(engine) as session:
-        zone = session.get(Zone, zone_id)
-        if not zone:
+    **kwargs: Any,
+) -> Any | None:
+    """Generic audited UPDATE: get -> before -> apply kwargs -> log -> commit.
+
+    Returns the updated (expunged) object, or ``None`` if not found.
+    """
+    with Session(engine, expire_on_commit=False) as session:
+        obj = session.get(model_cls, pk)
+        if obj is None:
             return None
-
-        before = _row_to_dict(zone)
-
-        if name is not None:
-            zone.name = name
-        if description is not None:
-            zone.description = description
-        if active is not None:
-            zone.active = active
-
-        # Replace channels if provided
-        if channel_ids is not None:
-            # Delete existing
-            for ch in list(zone.channels):
-                session.delete(ch)
-            session.flush()
-            for ch_id in channel_ids:
-                session.add(ZoneChannel(zone_id=zone.id, channel_id=ch_id))
-
-        # Replace multipliers if provided
-        if multipliers is not None:
-            for m in list(zone.multipliers):
-                session.delete(m)
-            session.flush()
-            for itype, (xp_m, star_m) in multipliers.items():
-                session.add(ZoneMultiplier(
-                    zone_id=zone.id,
-                    interaction_type=itype,
-                    xp_multiplier=xp_m,
-                    star_multiplier=star_m,
-                ))
-
+        before = _row_to_dict(obj)
+        for key, value in kwargs.items():
+            if hasattr(obj, key) and key not in frozen_keys:
+                setattr(obj, key, value)
         session.flush()
-        after = _row_to_dict(zone)
         _log_admin_action(
             session,
             actor_id=actor_id,
             action_type="UPDATE",
-            target_table="zones",
-            target_id=str(zone.id),
+            target_table=table_name,
+            target_id=str(obj.id),
             before=before,
-            after=after,
+            after=_row_to_dict(obj),
             ip_address=ip_address,
         )
+        notify_before_commit(session, table_name)
         session.commit()
-
-        send_notify(engine, "zones")
-        if channel_ids is not None:
-            send_notify(engine, "zone_channels")
-        if multipliers is not None:
-            send_notify(engine, "zone_multipliers")
-
-        session.refresh(zone)
-        session.expunge(zone)
-        return zone
+        session.refresh(obj)
+        session.expunge(obj)
+        return obj
 
 
-def deactivate_zone(
+def _audited_delete(
     engine,
+    model_cls: type,
+    pk: int,
     *,
-    zone_id: int,
+    table_name: str,
     actor_id: int,
     ip_address: str | None = None,
 ) -> bool:
-    """Soft-delete a zone."""
-    return update_zone(
-        engine,
-        zone_id=zone_id,
-        active=False,
-        actor_id=actor_id,
-        ip_address=ip_address,
-    ) is not None
+    """Generic audited DELETE: get -> log -> delete -> commit -> notify.
+
+    Returns ``True`` if the row existed and was deleted.
+    """
+    with Session(engine) as session:
+        obj = session.get(model_cls, pk)
+        if obj is None:
+            return False
+        _log_admin_action(
+            session,
+            actor_id=actor_id,
+            action_type="DELETE",
+            target_table=table_name,
+            target_id=str(obj.id),
+            before=_row_to_dict(obj),
+            after=None,
+            ip_address=ip_address,
+        )
+        session.delete(obj)
+        notify_before_commit(session, table_name)
+        session.commit()
+        return True
+
+
+# ---------------------------------------------------------------------------
+# Channel Type Default CRUD
+# ---------------------------------------------------------------------------
+
+def upsert_type_default(
+    engine,
+    *,
+    guild_id: int,
+    channel_type: str,
+    event_type: str,
+    xp_multiplier: float = 1.0,
+    star_multiplier: float = 1.0,
+    actor_id: int,
+) -> ChannelTypeDefault:
+    """Create or update a channel type default rule."""
+    with Session(engine, expire_on_commit=False) as session:
+        existing = session.scalar(
+            select(ChannelTypeDefault).where(
+                ChannelTypeDefault.guild_id == guild_id,
+                ChannelTypeDefault.channel_type == channel_type,
+                ChannelTypeDefault.event_type == event_type,
+            )
+        )
+        before = _row_to_dict(existing)
+
+        if existing:
+            existing.xp_multiplier = xp_multiplier
+            existing.star_multiplier = star_multiplier
+            action = "UPDATE"
+            obj = existing
+        else:
+            obj = ChannelTypeDefault(
+                guild_id=guild_id,
+                channel_type=channel_type,
+                event_type=event_type,
+                xp_multiplier=xp_multiplier,
+                star_multiplier=star_multiplier,
+            )
+            session.add(obj)
+            before = None
+            action = "CREATE"
+
+        session.flush()
+        _log_admin_action(
+            session,
+            actor_id=actor_id,
+            action_type=action,
+            target_table="channel_type_defaults",
+            target_id=str(obj.id),
+            before=before,
+            after=_row_to_dict(obj),
+        )
+        notify_before_commit(session, "channel_type_defaults")
+        session.commit()
+        session.refresh(obj)
+        session.expunge(obj)
+        return obj
+
+
+def delete_type_default(engine, *, default_id: int, actor_id: int) -> bool:
+    """Delete a channel type default. Returns True if found and deleted."""
+    return _audited_delete(
+        engine, ChannelTypeDefault, default_id,
+        table_name="channel_type_defaults", actor_id=actor_id,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Channel Override CRUD
+# ---------------------------------------------------------------------------
+
+def upsert_channel_override(
+    engine,
+    *,
+    guild_id: int,
+    channel_id: int,
+    event_type: str,
+    xp_multiplier: float = 1.0,
+    star_multiplier: float = 1.0,
+    reason: str | None = None,
+    actor_id: int,
+) -> ChannelOverride:
+    """Create or update a per-channel override."""
+    with Session(engine, expire_on_commit=False) as session:
+        existing = session.scalar(
+            select(ChannelOverride).where(
+                ChannelOverride.guild_id == guild_id,
+                ChannelOverride.channel_id == channel_id,
+                ChannelOverride.event_type == event_type,
+            )
+        )
+        before = _row_to_dict(existing)
+
+        if existing:
+            existing.xp_multiplier = xp_multiplier
+            existing.star_multiplier = star_multiplier
+            existing.reason = reason
+            action = "UPDATE"
+            obj = existing
+        else:
+            obj = ChannelOverride(
+                guild_id=guild_id,
+                channel_id=channel_id,
+                event_type=event_type,
+                xp_multiplier=xp_multiplier,
+                star_multiplier=star_multiplier,
+                reason=reason,
+            )
+            session.add(obj)
+            before = None
+            action = "CREATE"
+
+        session.flush()
+        _log_admin_action(
+            session,
+            actor_id=actor_id,
+            action_type=action,
+            target_table="channel_overrides",
+            target_id=str(obj.id),
+            before=before,
+            after=_row_to_dict(obj),
+        )
+        notify_before_commit(session, "channel_overrides")
+        session.commit()
+        session.refresh(obj)
+        session.expunge(obj)
+        return obj
+
+
+def delete_channel_override(engine, *, override_id: int, actor_id: int) -> bool:
+    """Delete a channel override. Returns True if found and deleted."""
+    return _audited_delete(
+        engine, ChannelOverride, override_id,
+        table_name="channel_overrides", actor_id=actor_id,
+    )
 
 
 # ---------------------------------------------------------------------------
 # Achievement Template CRUD
 # ---------------------------------------------------------------------------
+
 def create_achievement(
     engine,
     *,
     guild_id: int,
     name: str,
     description: str | None = None,
-    category: str = "social",
-    requirement_type: str = "custom",
-    requirement_scope: str = "season",
-    requirement_field: str | None = None,
-    requirement_value: int | None = None,
+    category_id: int | None = None,
+    rarity_id: int | None = None,
+    trigger_type: str = "manual",
+    trigger_config: dict | None = None,
+    series_id: int | None = None,
+    series_order: int | None = None,
     xp_reward: int = 0,
     gold_reward: int = 0,
-    badge_image_url: str | None = None,
-    rarity: str = "common",
+    badge_image: str | None = None,
     announce_channel_id: int | None = None,
+    is_hidden: bool = False,
+    max_earners: int | None = None,
     actor_id: int,
     ip_address: str | None = None,
 ) -> AchievementTemplate:
     """Create a new achievement template."""
-    with Session(engine) as session:
-        tmpl = AchievementTemplate(
+    return _audited_create(
+        engine,
+        AchievementTemplate(
             guild_id=guild_id,
             name=name,
             description=description,
-            category=category,
-            requirement_type=requirement_type,
-            requirement_scope=requirement_scope,
-            requirement_field=requirement_field,
-            requirement_value=requirement_value,
+            category_id=category_id,
+            rarity_id=rarity_id,
+            trigger_type=trigger_type,
+            trigger_config=trigger_config or {},
+            series_id=series_id,
+            series_order=series_order,
             xp_reward=xp_reward,
             gold_reward=gold_reward,
-            badge_image_url=badge_image_url,
-            rarity=rarity,
+            badge_image=badge_image,
             announce_channel_id=announce_channel_id,
-        )
-        session.add(tmpl)
-        session.flush()
-        after = _row_to_dict(tmpl)
-        _log_admin_action(
-            session,
-            actor_id=actor_id,
-            action_type="CREATE",
-            target_table="achievement_templates",
-            target_id=str(tmpl.id),
-            before=None,
-            after=after,
-            ip_address=ip_address,
-        )
-        session.commit()
-
-        send_notify(engine, "achievement_templates")
-
-        session.refresh(tmpl)
-        session.expunge(tmpl)
-        return tmpl
+            is_hidden=is_hidden,
+            max_earners=max_earners,
+        ),
+        table_name="achievement_templates",
+        actor_id=actor_id,
+        ip_address=ip_address,
+    )
 
 
 def update_achievement(
@@ -298,40 +383,182 @@ def update_achievement(
     **kwargs,
 ) -> AchievementTemplate | None:
     """Update an existing achievement template."""
-    with Session(engine) as session:
-        tmpl = session.get(AchievementTemplate, achievement_id)
-        if not tmpl:
-            return None
+    return _audited_update(
+        engine, AchievementTemplate, achievement_id,
+        table_name="achievement_templates",
+        actor_id=actor_id,
+        frozen_keys=("id", "guild_id", "created_at"),
+        ip_address=ip_address,
+        **kwargs,
+    )
 
-        before = _row_to_dict(tmpl)
-        for key, value in kwargs.items():
-            if hasattr(tmpl, key) and key not in ("id", "guild_id", "created_at"):
-                setattr(tmpl, key, value)
 
-        session.flush()
-        after = _row_to_dict(tmpl)
-        _log_admin_action(
-            session,
-            actor_id=actor_id,
-            action_type="UPDATE",
-            target_table="achievement_templates",
-            target_id=str(tmpl.id),
-            before=before,
-            after=after,
-            ip_address=ip_address,
-        )
-        session.commit()
+def delete_achievement(
+    engine,
+    *,
+    achievement_id: int,
+    actor_id: int,
+    ip_address: str | None = None,
+) -> bool:
+    """Delete an achievement template."""
+    return _audited_delete(
+        engine, AchievementTemplate, achievement_id,
+        table_name="achievement_templates",
+        actor_id=actor_id,
+        ip_address=ip_address,
+    )
 
-        send_notify(engine, "achievement_templates")
 
-        session.refresh(tmpl)
-        session.expunge(tmpl)
-        return tmpl
+# ---------------------------------------------------------------------------
+# Achievement Category CRUD
+# ---------------------------------------------------------------------------
+
+def create_achievement_category(
+    engine,
+    *,
+    guild_id: int,
+    name: str,
+    icon: str | None = None,
+    sort_order: int = 0,
+    actor_id: int,
+    ip_address: str | None = None,
+) -> AchievementCategory:
+    """Create a new achievement category."""
+    return _audited_create(
+        engine,
+        AchievementCategory(guild_id=guild_id, name=name, icon=icon, sort_order=sort_order),
+        table_name="achievement_categories",
+        actor_id=actor_id,
+        ip_address=ip_address,
+    )
+
+
+def update_achievement_category(
+    engine, *, category_id: int, actor_id: int, ip_address: str | None = None, **kwargs,
+) -> AchievementCategory | None:
+    """Update an existing achievement category."""
+    return _audited_update(
+        engine, AchievementCategory, category_id,
+        table_name="achievement_categories",
+        actor_id=actor_id,
+        ip_address=ip_address,
+        **kwargs,
+    )
+
+
+def delete_achievement_category(
+    engine, *, category_id: int, actor_id: int, ip_address: str | None = None,
+) -> bool:
+    """Delete an achievement category."""
+    return _audited_delete(
+        engine, AchievementCategory, category_id,
+        table_name="achievement_categories",
+        actor_id=actor_id,
+        ip_address=ip_address,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Achievement Rarity CRUD
+# ---------------------------------------------------------------------------
+
+def create_achievement_rarity(
+    engine,
+    *,
+    guild_id: int,
+    name: str,
+    color: str = "#9e9e9e",
+    sort_order: int = 0,
+    actor_id: int,
+    ip_address: str | None = None,
+) -> AchievementRarity:
+    """Create a new achievement rarity tier."""
+    return _audited_create(
+        engine,
+        AchievementRarity(guild_id=guild_id, name=name, color=color, sort_order=sort_order),
+        table_name="achievement_rarities",
+        actor_id=actor_id,
+        ip_address=ip_address,
+    )
+
+
+def update_achievement_rarity(
+    engine, *, rarity_id: int, actor_id: int, ip_address: str | None = None, **kwargs,
+) -> AchievementRarity | None:
+    """Update an existing achievement rarity tier."""
+    return _audited_update(
+        engine, AchievementRarity, rarity_id,
+        table_name="achievement_rarities",
+        actor_id=actor_id,
+        ip_address=ip_address,
+        **kwargs,
+    )
+
+
+def delete_achievement_rarity(
+    engine, *, rarity_id: int, actor_id: int, ip_address: str | None = None,
+) -> bool:
+    """Delete an achievement rarity tier."""
+    return _audited_delete(
+        engine, AchievementRarity, rarity_id,
+        table_name="achievement_rarities",
+        actor_id=actor_id,
+        ip_address=ip_address,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Achievement Series CRUD
+# ---------------------------------------------------------------------------
+
+def create_achievement_series(
+    engine,
+    *,
+    guild_id: int,
+    name: str,
+    description: str | None = None,
+    actor_id: int,
+    ip_address: str | None = None,
+) -> AchievementSeries:
+    """Create a new achievement series."""
+    return _audited_create(
+        engine,
+        AchievementSeries(guild_id=guild_id, name=name, description=description),
+        table_name="achievement_series",
+        actor_id=actor_id,
+        ip_address=ip_address,
+    )
+
+
+def update_achievement_series(
+    engine, *, series_id: int, actor_id: int, ip_address: str | None = None, **kwargs,
+) -> AchievementSeries | None:
+    """Update an existing achievement series."""
+    return _audited_update(
+        engine, AchievementSeries, series_id,
+        table_name="achievement_series",
+        actor_id=actor_id,
+        ip_address=ip_address,
+        **kwargs,
+    )
+
+
+def delete_achievement_series(
+    engine, *, series_id: int, actor_id: int, ip_address: str | None = None,
+) -> bool:
+    """Delete an achievement series."""
+    return _audited_delete(
+        engine, AchievementSeries, series_id,
+        table_name="achievement_series",
+        actor_id=actor_id,
+        ip_address=ip_address,
+    )
 
 
 # ---------------------------------------------------------------------------
 # Season Management
 # ---------------------------------------------------------------------------
+
 def create_season(
     engine,
     *,
@@ -344,9 +571,8 @@ def create_season(
     activate: bool = True,
 ) -> Season:
     """Create a new season, optionally deactivating the current one."""
-    with Session(engine) as session:
+    with Session(engine, expire_on_commit=False) as session:
         if activate:
-            # Deactivate current active season
             current = session.scalar(
                 select(Season).where(
                     Season.guild_id == guild_id, Season.active.is_(True)

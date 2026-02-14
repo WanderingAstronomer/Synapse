@@ -48,21 +48,21 @@ Defined in `synapse/engine/events.py`:
 | VOICE_JOIN | 0 | 0 |
 | VOICE_LEAVE | 0 | 0 |
 
-## Zones
+## Categories
 
-Channels are grouped into **Zones**. Each zone has per-event-type multipliers for XP and Stars.
+Channels are grouped into **Categories**. Each category has per-event-type multipliers for XP and Stars.
 
 ### Bootstrap
 
-During first-run setup, zones are created from Discord server categories. Channels are mapped to zones by matching category name to zone name (case-insensitive substring match). Unmapped channels fall back to a "general" zone or the first available zone.
+During first-run setup, categories are created from Discord server categories. Channels are mapped to categories by matching Discord category name to category name (case-insensitive substring match). Unmapped channels fall back to a "general" category or the first available category.
 
 ### Multipliers
 
-Stored in `zone_multipliers` table. Each row maps `(zone_id, interaction_type)` → `(xp_multiplier, star_multiplier)`. Defaults to `(1.0, 1.0)` if no entry exists.
+Stored in `category_multipliers` table. Each row maps `(category_id, interaction_type)` → `(xp_multiplier, star_multiplier)`. Defaults to `(1.0, 1.0)` if no entry exists.
 
-### Zone Classification
+### Category Classification
 
-In the reward pipeline, each event's `channel_id` is resolved to a zone via `ConfigCache.get_zone_for_channel()`. The zone's multipliers are then looked up for the event type.
+In the reward pipeline, each event's `channel_id` is resolved to a category via `ConfigCache.get_category_for_channel()`. The category's multipliers are then looked up for the event type.
 
 ## Reward Pipeline
 
@@ -70,8 +70,8 @@ Implemented in `synapse/engine/reward.py` as a pure calculation function (no I/O
 
 ```
 SynapseEvent
-  → Zone Classification (channel → zone lookup)
-  → Multiplier Lookup (zone × event_type → xp_mult, star_mult)
+  → Category Classification (channel → category lookup)
+  → Multiplier Lookup (category × event_type → xp_mult, star_mult)
   → Quality Modifier (MESSAGE only, multiplicative on XP)
   → Anti-Gaming Adjustments
   → XP Cap Application
@@ -79,7 +79,7 @@ SynapseEvent
   → RewardResult
 ```
 
-The pipeline returns a `RewardResult` dataclass with: `xp`, `stars`, `leveled_up`, `new_level`, `gold_bonus`, `achievements_earned`, `zone_name`.
+The pipeline returns a `RewardResult` dataclass with: `xp`, `stars`, `leveled_up`, `new_level`, `gold_bonus`, `achievements_earned`, `category_name`.
 
 ## Quality Modifiers
 
@@ -95,8 +95,6 @@ Applied only to MESSAGE events, multiplicatively on XP. Implemented in `synapse/
 | Emoji count > 5 | ×0.5 | `quality_emoji_spam_threshold` / `quality_penalty_emoji_spam` |
 
 Length tiers are mutually exclusive (longest match wins). All modifiers stack multiplicatively. Floor: `max(result, 0.1)`.
-
-An LLM quality modifier slot exists (`llm_quality_modifier()`) but currently returns 1.0 (deferred).
 
 ## Anti-Gaming
 

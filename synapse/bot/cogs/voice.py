@@ -23,7 +23,6 @@ from synapse.database.engine import run_db
 from synapse.database.models import InteractionType
 from synapse.engine.events import SynapseEvent
 from synapse.services.announcement_service import announce_rewards
-from synapse.services.reward_service import process_event
 
 if TYPE_CHECKING:
     from synapse.bot.core import SynapseBot
@@ -44,6 +43,8 @@ class Voice(commands.Cog, name="Voice"):
         self._voice_sessions: dict[int, float] = {}
         # {user_id: [tick_timestamps]} — for hourly cap enforcement
         self._voice_tick_log: dict[int, list[float]] = {}
+        # Track the current loop interval for dynamic adjustment
+        self._current_tick_minutes: int = 10
 
     async def cog_load(self) -> None:
         """Start the voice tick loop when the cog is loaded."""
@@ -52,15 +53,6 @@ class Voice(commands.Cog, name="Voice"):
     async def cog_unload(self) -> None:
         """Stop the voice tick loop when the cog is unloaded."""
         self.voice_tick_loop.cancel()
-
-    def _process(self, event: SynapseEvent, display_name: str):
-        """Sync wrapper for process_event."""
-        return process_event(
-            self.bot.engine,
-            self.bot.cache,
-            event,
-            display_name,
-        )
 
     def _is_voice_tick_capped(self, user_id: int) -> bool:
         """Check if user has hit the hourly voice tick cap."""
@@ -90,14 +82,17 @@ class Voice(commands.Cog, name="Voice"):
         """Track voice join/leave events."""
         before_ch = getattr(before.channel, "name", "None")
         after_ch = getattr(after.channel, "name", "None")
-        logger.info(
+        logger.debug(
             "Gateway event: VOICE_STATE %s (%s → %s, bot=%s)",
             member.name, before_ch, after_ch, member.bot,
         )
         try:
             await self._handle_voice_update(member, before, after)
         except Exception:
-            logger.exception("Error processing voice state update for user %s", member.id)
+            logger.exception(
+                "Error processing voice state update for user %s", member.id,
+                extra={"event_type": "voice_state", "user_id": member.id},
+            )
 
     async def _handle_voice_update(
         self,
@@ -146,7 +141,11 @@ class Voice(commands.Cog, name="Voice"):
             logger.debug("%s left voice channel %s", member, before.channel)
 
         # --- Voice MOVE (changed channels) ---
-        elif before.channel is not None and after.channel is not None and before.channel != after.channel:
+        elif (
+            before.channel is not None
+            and after.channel is not None
+            and before.channel != after.channel
+        ):
             self._voice_sessions[member.id] = self._voice_sessions.get(
                 member.id, time.time()
             )
@@ -177,6 +176,13 @@ class Voice(commands.Cog, name="Voice"):
         if not self.bot.is_ready():
             return
 
+        # Dynamically adjust loop interval if the setting changed
+        tick_minutes = self.bot.cache.get_int("voice_tick_minutes", 10)
+        if tick_minutes != self._current_tick_minutes:
+            self._current_tick_minutes = tick_minutes
+            self.voice_tick_loop.change_interval(minutes=tick_minutes)
+            logger.info("Voice tick interval adjusted to %d minutes", tick_minutes)
+
         for guild in self.bot.guilds:
             for vc in guild.voice_channels:
                 for member in vc.members:
@@ -198,7 +204,6 @@ class Voice(commands.Cog, name="Voice"):
 
                     self._record_voice_tick(member.id)
 
-                    tick_minutes = self.bot.cache.get_int("voice_tick_minutes", 10)
                     event = SynapseEvent(
                         user_id=member.id,
                         event_type=InteractionType.VOICE_TICK,
@@ -213,7 +218,7 @@ class Voice(commands.Cog, name="Voice"):
                     )
 
                     result, was_duplicate = await run_db(
-                        self._process,
+                        self.bot.process_event_sync,
                         event,
                         member.display_name,
                     )

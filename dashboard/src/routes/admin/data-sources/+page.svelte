@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { api, type DataSourceConfig, type EventLakeHealth, type StorageEstimate } from '$lib/api';
-	import { flash } from '$lib/stores/flash';
+	import { flash } from '$lib/stores/flash.svelte';
 	import { fmtShort, fmtDateTime, timeAgo } from '$lib/utils';
 
 	let sources = $state<DataSourceConfig[]>([]);
@@ -18,15 +18,15 @@
 
 	/** Event type icons */
 	const TYPE_ICONS: Record<string, string> = {
-		message_create: '💬',
-		reaction_add: '👍',
-		reaction_remove: '👎',
-		thread_create: '🧵',
-		voice_join: '🔊',
-		voice_leave: '🔇',
-		voice_move: '🔀',
-		member_join: '📥',
-		member_leave: '📤',
+		message_create: '',
+		reaction_add: '',
+		reaction_remove: '',
+		thread_create: '',
+		voice_join: '',
+		voice_leave: '',
+		voice_move: '',
+		member_join: '',
+		member_leave: '',
 	};
 
 	/** Event type colors for volume bars */
@@ -136,7 +136,7 @@
 
 <div class="flex items-center justify-between mb-6">
 	<div>
-		<h1 class="text-2xl font-bold text-white">🗄️ Event Lake</h1>
+		<h1 class="text-2xl font-bold text-white">Event Lake</h1>
 		<p class="text-sm text-zinc-500 mt-1">Configure data sources, monitor volume, and manage storage.</p>
 	</div>
 	{#if hasChanges}
@@ -145,7 +145,7 @@
 				<span class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
 				Saving…
 			{:else}
-				💾 Save Changes
+				Save Changes
 			{/if}
 		</button>
 	{/if}
@@ -165,7 +165,7 @@
 				<p class="text-2xl font-bold text-white mt-1">{fmtShort(health.total_events)}</p>
 			</div>
 			<div class="card p-4">
-				<p class="text-[10px] text-zinc-500 uppercase tracking-wider font-medium">Today</p>
+				<p class="text-[10px] text-zinc-500 uppercase tracking-wider font-medium">Today <span class="normal-case opacity-60">(UTC)</span></p>
 				<p class="text-2xl font-bold text-white mt-1">{fmtShort(health.events_today)}</p>
 			</div>
 			<div class="card p-4">
@@ -182,7 +182,7 @@
 	<!-- Data Sources Grid -->
 	<div class="settings-group mb-8">
 		<div class="settings-group-header flex items-center gap-3">
-			<span class="text-lg">📡</span>
+			
 			<div>
 				<h3 class="text-sm font-semibold text-zinc-200">Data Sources</h3>
 				<p class="text-xs text-zinc-500">Toggle which Discord events are captured to the Event Lake.</p>
@@ -196,7 +196,7 @@
 				<div class="flex items-center gap-4 px-5 py-4 hover:bg-surface-200/30 transition-colors
 					{ds.event_type in pendingToggles ? 'bg-brand-500/5 border-l-2 border-l-brand-500' : ''}">
 					<!-- Icon & info -->
-					<span class="text-xl w-8 text-center">{TYPE_ICONS[ds.event_type] ?? '📊'}</span>
+					<span class="text-xl w-8 text-center"></span>
 					<div class="flex-1 min-w-0">
 						<div class="flex items-center gap-2">
 							<span class="text-sm font-medium text-zinc-200">{ds.label}</span>
@@ -237,7 +237,7 @@
 	{#if storage}
 		<div class="settings-group mb-8">
 			<div class="settings-group-header flex items-center gap-3">
-				<span class="text-lg">💾</span>
+				
 				<div>
 					<h3 class="text-sm font-semibold text-zinc-200">Storage Estimate</h3>
 					<p class="text-xs text-zinc-500">Based on ~{storage.avg_row_bytes} bytes per event row.</p>
@@ -268,7 +268,7 @@
 	{#if health}
 		<div class="settings-group mb-8">
 			<div class="settings-group-header flex items-center gap-3">
-				<span class="text-lg">🕐</span>
+				
 				<div>
 					<h3 class="text-sm font-semibold text-zinc-200">Data Range</h3>
 					<p class="text-xs text-zinc-500">Time span of stored events.</p>
@@ -296,7 +296,7 @@
 	<!-- Maintenance Operations -->
 	<div class="settings-group mb-8 danger-zone">
 		<div class="settings-group-header flex items-center gap-3">
-			<span class="text-lg">🔧</span>
+			
 			<div>
 				<h3 class="text-sm font-semibold text-zinc-200">Maintenance</h3>
 				<p class="text-xs text-zinc-500">Manual triggers for Event Lake maintenance jobs.</p>
@@ -311,7 +311,7 @@
 					<p class="text-[10px] text-zinc-500">Delete events older than 90 days and prune stale day-counters.</p>
 				</div>
 				<button class="btn-secondary text-xs" onclick={runRetention} disabled={runningRetention}>
-					{runningRetention ? '⏳ Running…' : '🗑️ Run Now'}
+					{runningRetention ? 'Running…' : 'Run Now'}
 				</button>
 			</div>
 			<!-- Reconciliation -->
@@ -321,7 +321,7 @@
 					<p class="text-[10px] text-zinc-500">Validate lifetime counters against raw events and fix drift.</p>
 				</div>
 				<button class="btn-secondary text-xs" onclick={runReconciliation} disabled={runningReconciliation}>
-					{runningReconciliation ? '⏳ Running…' : '🔄 Reconcile'}
+					{runningReconciliation ? 'Running…' : 'Reconcile'}
 				</button>
 			</div>
 			<!-- Backfill -->
@@ -331,7 +331,7 @@
 					<p class="text-[10px] text-zinc-500">Migrate legacy activity_log counts into event_counters (one-time).</p>
 				</div>
 				<button class="btn-secondary text-xs" onclick={runBackfill} disabled={runningBackfill}>
-					{runningBackfill ? '⏳ Running…' : '📥 Backfill'}
+					{runningBackfill ? 'Running…' : 'Backfill'}
 				</button>
 			</div>
 		</div>

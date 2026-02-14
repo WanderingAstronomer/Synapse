@@ -22,7 +22,6 @@ from synapse.database.engine import run_db
 from synapse.database.models import InteractionType
 from synapse.engine.events import SynapseEvent
 from synapse.services.announcement_service import announce_rewards
-from synapse.services.reward_service import process_event
 
 if TYPE_CHECKING:
     from synapse.bot.core import SynapseBot
@@ -36,19 +35,10 @@ class Reactions(commands.Cog, name="Reactions"):
     def __init__(self, bot: SynapseBot) -> None:
         self.bot = bot
 
-    def _process(self, event: SynapseEvent, display_name: str):
-        """Sync wrapper for process_event."""
-        return process_event(
-            self.bot.engine,
-            self.bot.cache,
-            event,
-            display_name,
-        )
-
     @commands.Cog.listener()
     async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent) -> None:
         """Fire when any reaction is added, even on uncached messages."""
-        logger.info(
+        logger.debug(
             "Gateway event: REACTION_ADD from user %s on message %s in channel %s",
             payload.user_id, payload.message_id, payload.channel_id,
         )
@@ -58,6 +48,8 @@ class Reactions(commands.Cog, name="Reactions"):
             logger.exception(
                 "Error processing reaction on message %s from user %s",
                 payload.message_id, payload.user_id,
+                extra={"event_type": "reaction_add", "user_id": payload.user_id,
+                       "message_id": payload.message_id},
             )
 
     @commands.Cog.listener()
@@ -78,6 +70,8 @@ class Reactions(commands.Cog, name="Reactions"):
             logger.exception(
                 "Error processing reaction remove on message %s from user %s",
                 payload.message_id, payload.user_id,
+                extra={"event_type": "reaction_remove", "user_id": payload.user_id,
+                       "message_id": payload.message_id},
             )
 
     async def _handle_reaction(self, payload: discord.RawReactionActionEvent) -> None:
@@ -127,7 +121,7 @@ class Reactions(commands.Cog, name="Reactions"):
         )
 
         given_result, given_dup = await run_db(
-            self._process,
+            self.bot.process_event_sync,
             given_event,
             payload.member.display_name,
         )
@@ -160,12 +154,12 @@ class Reactions(commands.Cog, name="Reactions"):
         if message.author.bot:
             return
 
-        # Count unique reactors on this message for anti-gaming metadata
-        unique_reactors = set()
-        for reaction in message.reactions:
-            async for user in reaction.users():
-                if not user.bot and user.id != message.author.id:
-                    unique_reactors.add(user.id)
+        # Approximate unique reactor count from reaction totals (avoids
+        # expensive per-reaction ``reaction.users()`` API calls).
+        unique_reactor_estimate = sum(
+            r.count for r in message.reactions
+        ) - 1  # subtract 1 for the bot's own potential reaction
+        unique_reactor_estimate = max(unique_reactor_estimate, 1)
 
         received_event = SynapseEvent(
             user_id=message.author.id,
@@ -177,13 +171,13 @@ class Reactions(commands.Cog, name="Reactions"):
                 "emoji": str(payload.emoji),
                 "reactor_id": payload.user_id,
                 "message_id": payload.message_id,
-                "unique_reactor_count": len(unique_reactors),
+                "unique_reactor_count": unique_reactor_estimate,
                 "channel_name": getattr(channel, "name", "unknown"),
             },
         )
 
         recv_result, recv_dup = await run_db(
-            self._process,
+            self.bot.process_event_sync,
             received_event,
             message.author.display_name,
         )

@@ -81,6 +81,7 @@ The dashboard has its own `dashboard/Dockerfile` for the SvelteKit Node adapter 
 |----------|---------|-------------|
 | `DEV_GUILD_ID` | — | If set, syncs slash commands to this guild only (faster for dev) |
 | `API_BASE_URL` | `http://localhost:8000/api` | Dashboard env: API backend URL for proxy |
+| `CORS_ALLOW_ORIGINS` | — | API env: comma-separated CORS allowlist (falls back to `FRONTEND_URL`) |
 | `ORIGIN` | — | Dashboard env: SvelteKit origin for CSRF |
 | `BODY_SIZE_LIMIT` | — | Dashboard env: request body size limit |
 
@@ -129,8 +130,8 @@ After starting all services:
 3. You must have the `admin_role_id` role in the Discord server
 4. Navigate to `/admin/setup` (auto-redirect if not bootstrapped)
 5. Click Bootstrap — this creates:
-   - Zones from Discord server categories
-   - Channel → zone mappings
+   - Categories from Discord server categories
+   - Channel → category mappings
    - Default season (120 days)
    - 18+ default settings (economy, anti-gaming, quality, display, announcements)
 

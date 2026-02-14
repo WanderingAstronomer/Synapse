@@ -18,7 +18,6 @@ from synapse.database.engine import run_db
 from synapse.database.models import InteractionType
 from synapse.engine.events import SynapseEvent
 from synapse.services.announcement_service import announce_rewards
-from synapse.services.reward_service import process_event
 
 if TYPE_CHECKING:
     from synapse.bot.core import SynapseBot
@@ -32,19 +31,10 @@ class Threads(commands.Cog, name="Threads"):
     def __init__(self, bot: SynapseBot) -> None:
         self.bot = bot
 
-    def _process(self, event: SynapseEvent, display_name: str):
-        """Sync wrapper for process_event."""
-        return process_event(
-            self.bot.engine,
-            self.bot.cache,
-            event,
-            display_name,
-        )
-
     @commands.Cog.listener()
     async def on_thread_create(self, thread: discord.Thread) -> None:
         """Award XP/Stars for creating a new thread."""
-        logger.info(
+        logger.debug(
             "Gateway event: THREAD_CREATE '%s' by %s in guild %s",
             thread.name,
             getattr(thread.owner, "name", "unknown"),
@@ -53,7 +43,10 @@ class Threads(commands.Cog, name="Threads"):
         try:
             await self._handle_thread_create(thread)
         except Exception:
-            logger.exception("Error processing thread creation %s", thread.id)
+            logger.exception(
+                "Error processing thread creation %s", thread.id,
+                extra={"event_type": "thread_create", "thread_id": thread.id},
+            )
 
     async def _handle_thread_create(self, thread: discord.Thread) -> None:
         """Inner thread create handler (separated for error isolation)."""
@@ -86,7 +79,7 @@ class Threads(commands.Cog, name="Threads"):
         )
 
         result, was_duplicate = await run_db(
-            self._process,
+            self.bot.process_event_sync,
             event,
             thread.owner.display_name,
         )

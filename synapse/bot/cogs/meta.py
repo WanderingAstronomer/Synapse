@@ -18,11 +18,12 @@ from typing import TYPE_CHECKING
 import discord
 from discord import app_commands
 from discord.ext import commands
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 
-from synapse.constants import RARITY_EMOJI, xp_for_level
+from synapse.constants import RANK_BADGES, xp_for_level
 from synapse.database.engine import get_session, run_db
 from synapse.database.models import (
+    AchievementRarity,
     AchievementTemplate,
     Season,
     User,
@@ -85,9 +86,14 @@ class Meta(commands.Cog, name="Meta"):
                 select(AchievementTemplate)
                 .join(UserAchievement, UserAchievement.achievement_id == AchievementTemplate.id)
                 .where(UserAchievement.user_id == user_id)
-                .order_by(AchievementTemplate.rarity.desc())
+                .order_by(AchievementTemplate.name)
                 .limit(10)
             ).all()
+
+            # Build rarity lookup for emoji display
+            rarity_map = {
+                r.id: r for r in session.scalars(select(AchievementRarity)).all()
+            }
 
             ach_count = session.scalar(
                 select(func.count(UserAchievement.achievement_id))
@@ -111,9 +117,24 @@ class Meta(commands.Cog, name="Meta"):
                     "messages_sent": stats.messages_sent if stats else 0,
                     "reactions_given": stats.reactions_given if stats else 0,
                     "voice_minutes": stats.voice_minutes if stats else 0,
-                } if True else {},
+                },
                 "achievements": [
-                    {"name": a.name, "rarity": a.rarity} for a in achievements
+                    {
+                        "name": a.name,
+                        "rarity": (
+                            rarity_map[a.rarity_id].name
+                            if a.rarity_id and a.rarity_id in rarity_map
+                            else None
+                        ),
+                        "emoji": (
+                            rarity_map[a.rarity_id].emoji
+                            if a.rarity_id
+                            and a.rarity_id in rarity_map
+                            and rarity_map[a.rarity_id].emoji
+                            else "\u26aa"
+                        ),
+                    }
+                    for a in achievements
                 ],
                 "achievement_count": ach_count,
                 "season_name": season.name if season else "No active season",
@@ -164,13 +185,23 @@ class Meta(commands.Cog, name="Meta"):
             return getattr(prefs, field)
 
     def _buy_coffee(self, user_id: int, cost: int) -> tuple[bool, int]:
-        """Attempt to spend gold on coffee. Returns (success, remaining_gold)."""
+        """Attempt to spend gold on coffee. Returns (success, remaining_gold).
+
+        Uses atomic SQL UPDATE with a guard clause to prevent race
+        conditions under concurrent commands.
+        """
         with get_session(self.bot.engine) as session:
+            row = session.execute(
+                update(User)
+                .where(User.id == user_id, User.gold >= cost)
+                .values(gold=User.gold - cost)
+                .returning(User.gold)
+            ).first()
+            if row is not None:
+                return True, row[0]
+            # Purchase failed — either user missing or insufficient gold
             user = session.get(User, user_id)
-            if user is None or user.gold < cost:
-                return False, user.gold if user else 0
-            user.gold -= cost
-            return True, user.gold
+            return False, user.gold if user else 0
 
     # -------------------------------------------------------------------
     # /link-github
@@ -253,7 +284,7 @@ class Meta(commands.Cog, name="Meta"):
         # Achievements
         if data["achievements"]:
             ach_lines = [
-                f"{RARITY_EMOJI.get(a['rarity'], '\u26aa')} {a['name']}"
+                f"{a['emoji']} {a['name']}"
                 for a in data["achievements"][:5]
             ]
             ach_text = "\n".join(ach_lines)
@@ -301,7 +332,7 @@ class Meta(commands.Cog, name="Meta"):
         label = "XP" if sort_by == "xp" else "\u2b50 Stars"
         lines = []
         for i, r in enumerate(rows, 1):
-            medal = {1: "\U0001f947", 2: "\U0001f948", 3: "\U0001f949"}.get(i, f"**{i}.**")
+            medal = RANK_BADGES[i-1] if 0 < i <= len(RANK_BADGES) else f"**{i}.**"
             lines.append(f"{medal} **{r['name']}** — {r['value']:,} {label} (Lv. {r['level']})")
 
         embed = discord.Embed(

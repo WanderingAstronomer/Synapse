@@ -78,9 +78,9 @@ The `event_counters` table maintains pre-aggregated counts for O(1) reads. Updat
 
 ### Composite Key
 
-`(user_id, event_type, zone_id, period)`
+`(user_id, event_type, category_id, period)`
 
-- `zone_id = 0` means global (no zone filter)
+- `category_id = 0` means global (no category filter)
 - `period` values: `lifetime`, `season`, `day:YYYY-MM-DD`
 
 ### Update Logic
@@ -133,7 +133,7 @@ Daily background task (`retention_loop` in `PeriodicTasks` cog). Implemented in 
 Weekly background task (`reconciliation_loop` in `PeriodicTasks` cog). Implemented in `synapse/services/reconciliation_service.py`.
 
 - Ground truth: `COUNT(*)` from `event_lake` grouped by `(user_id, event_type)`
-- Compares against `event_counters` where `period='lifetime'` and `zone_id=0`
+- Compares against `event_counters` where `period='lifetime'` and `category_id=0`
 - Corrects mismatches via SQL UPSERT
 - Detects orphan counters (no matching events) and zeros them
 - Daily counters are **not** reconciled — they share the retention window

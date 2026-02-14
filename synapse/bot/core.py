@@ -11,7 +11,7 @@ subclass of ``commands.Bot`` that:
 2. Automatically discovers and loads every Cog in ``synapse/bot/cogs/``.
 3. Syncs the slash-command tree on startup (guild-scoped for dev, global
    for production — controlled by the ``DEV_GUILD_ID`` env var).
-4. Auto-discovers guild channels and maps them to zones on startup.
+4. Auto-discovers guild channels and maps them to categories on startup.
 5. Auto-creates a ``#synapse-achievements`` channel for notifications.
 6. Starts the announcement throttle drain task.
 
@@ -32,8 +32,18 @@ from discord.ext import commands
 from sqlalchemy import Engine
 
 from synapse.config import SynapseConfig
+from synapse.database.engine import run_db
 from synapse.engine.cache import ConfigCache
+from synapse.engine.events import SynapseEvent
+from synapse.services.announcement_service import start_queue, stop_queue
+from synapse.services.channel_service import sync_channels_from_snapshot
 from synapse.services.event_lake_writer import EventLakeWriter
+from synapse.services.reward_service import process_event
+from synapse.services.setup_service import (
+    ChannelInfo,
+    GuildSnapshot,
+    save_guild_snapshot,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +105,10 @@ class SynapseBot(commands.Bot):
         # Will be set in on_ready after auto-creating the achievements channel
         self.synapse_announce_channel_id: int | None = None
 
+    def process_event_sync(self, event: SynapseEvent, display_name: str):
+        """Process a reward event synchronously.  Call via ``run_db()``."""
+        return process_event(self.engine, self.cache, event, display_name)
+
     # -----------------------------------------------------------------------
     # Lifecycle hooks
     # -----------------------------------------------------------------------
@@ -131,7 +145,7 @@ class SynapseBot(commands.Bot):
         # --- Auto-create #synapse-achievements channel ----------------------
         await self._ensure_achievements_channel()
 
-        # --- Auto-discover guild channels and map to zones ------------------
+        # --- Auto-discover guild channels and map to categories ------------------
         await self._auto_discover_channels()
 
         # --- Audit text-channel access to catch permission override issues ---
@@ -141,171 +155,172 @@ class SynapseBot(commands.Bot):
         await self._detect_afk_channels()
 
         # --- Start announcement throttle drain task -------------------------
-        from synapse.services.announcement_service import start_queue
         start_queue(asyncio.get_running_loop())
         logger.info("Announcement throttle drain task started.")
 
+        # --- Register event callbacks for cross-service notifications -------
+        await self._register_event_callbacks()
+
     async def close(self) -> None:
-        """Graceful shutdown — stop background tasks."""
-        from synapse.services.announcement_service import stop_queue
+        """Graceful shutdown — stop background tasks and listener thread."""
+        logger.info("Bot shutting down…")
+        self.cache.stop_listener()  # Graceful PG LISTEN thread exit (TD-005)
         stop_queue()
         await super().close()
+
+    # -----------------------------------------------------------------------
+    # Cross-service event callbacks (PG NOTIFY → bot actions)
+    # -----------------------------------------------------------------------
+    async def _register_event_callbacks(self) -> None:
+        """Register async callbacks for events arriving via PG NOTIFY."""
+        loop = asyncio.get_running_loop()
+        self.cache.register_event_callback(
+            "achievement_granted", self._on_achievement_granted, loop=loop,
+        )
+        logger.info("Event callbacks registered on asyncio loop")
+
+    async def _on_achievement_granted(self, data: dict) -> None:
+        """Handle an achievement_granted event from the API.
+
+        Fires the same rich announcement used by the bot /grant command.
+        """
+        from synapse.services.announcement_service import announce_achievement_grant
+
+        recipient_id = int(data["recipient_id"])
+        display_name = data.get("display_name", "Unknown")
+        achievement_id = int(data["achievement_id"])
+        admin_name = data.get("admin_name", "Admin")
+
+        # Try to resolve avatar from guild member cache
+        guild = self.get_guild(self.cfg.guild_id)
+        avatar_url = ""
+        if guild:
+            member = guild.get_member(recipient_id)
+            if member:
+                avatar_url = member.display_avatar.url
+                display_name = member.display_name  # prefer live name
+
+        await announce_achievement_grant(
+            self,
+            recipient_id=recipient_id,
+            display_name=display_name,
+            avatar_url=avatar_url,
+            achievement_id=achievement_id,
+            admin_name=admin_name,
+        )
 
     # -----------------------------------------------------------------------
     # Auto-create #synapse-achievements
     # -----------------------------------------------------------------------
     async def _ensure_achievements_channel(self) -> None:
         """Create #synapse-achievements in the primary guild if it doesn't exist."""
-        for g in self.guilds:
-            if g.id != self.cfg.guild_id:
-                continue
+        guild = self.get_guild(self.cfg.guild_id)
+        if guild is None:
+            logger.warning("Primary guild %d not found — skipping achievements channel", self.cfg.guild_id)
+            return
 
-            # Check if channel already exists
-            for ch in g.text_channels:
-                if ch.name == ACHIEVEMENTS_CHANNEL_NAME:
-                    self.synapse_announce_channel_id = ch.id
-                    logger.info(
-                        "Found existing #%s channel (ID: %d)",
-                        ACHIEVEMENTS_CHANNEL_NAME, ch.id,
-                    )
-                    return
-
-            # Create the channel
-            try:
-                new_ch = await g.create_text_channel(
-                    name=ACHIEVEMENTS_CHANNEL_NAME,
-                    topic=(
-                        f"\U0001f3c6 {self.cfg.community_name} achievements, level-ups, "
-                        "and celebrations \u2014 powered by Synapse"
-                    ),
-                    reason="Synapse: auto-created unified notification channel",
-                )
-                self.synapse_announce_channel_id = new_ch.id
+        # Check if channel already exists
+        for ch in guild.text_channels:
+            if ch.name == ACHIEVEMENTS_CHANNEL_NAME:
+                self.synapse_announce_channel_id = ch.id
                 logger.info(
-                    "Created #%s channel (ID: %d) in guild %s",
-                    ACHIEVEMENTS_CHANNEL_NAME, new_ch.id, g.name,
+                    "Found existing #%s channel (ID: %d)",
+                    ACHIEVEMENTS_CHANNEL_NAME, ch.id,
                 )
-            except discord.Forbidden:
-                logger.warning(
-                    "Missing permissions to create #%s in guild %s \u2014 "
-                    "achievement announcements will use fallback channels.",
-                    ACHIEVEMENTS_CHANNEL_NAME, g.name,
-                )
-            except Exception:
-                logger.exception(
-                    "Failed to create #%s in guild %s",
-                    ACHIEVEMENTS_CHANNEL_NAME, g.name,
-                )
-            return  # Only process the primary guild
+                return
+
+        # Create the channel
+        try:
+            new_ch = await guild.create_text_channel(
+                name=ACHIEVEMENTS_CHANNEL_NAME,
+                topic=(
+                    f"\U0001f3c6 {self.cfg.community_name} achievements, level-ups, "
+                    "and celebrations \u2014 powered by Synapse"
+                ),
+                reason="Synapse: auto-created unified notification channel",
+            )
+            self.synapse_announce_channel_id = new_ch.id
+            logger.info(
+                "Created #%s channel (ID: %d) in guild %s",
+                ACHIEVEMENTS_CHANNEL_NAME, new_ch.id, guild.name,
+            )
+        except discord.Forbidden:
+            logger.warning(
+                "Missing permissions to create #%s in guild %s — "
+                "achievement announcements will use fallback channels.",
+                ACHIEVEMENTS_CHANNEL_NAME, guild.name,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to create #%s in guild %s",
+                ACHIEVEMENTS_CHANNEL_NAME, guild.name,
+            )
 
     # -----------------------------------------------------------------------
-    # Auto-discover guild channels and map to zones
+    # Auto-discover guild channels and map to categories
     # -----------------------------------------------------------------------
     async def _auto_discover_channels(self) -> None:
         """Build a guild snapshot and persist it for the setup wizard.
 
-        Instead of mapping channels to zones at startup (which requires
-        zones to already exist), the bot now captures a full snapshot of
-        the guild's channel structure and saves it to the ``Setting``
-        table.  The admin dashboard reads this snapshot during the
-        first-run bootstrap wizard.
+        Captures a full snapshot of the guild's channel structure and saves
+        it to the ``Setting`` table.  The admin dashboard reads this snapshot
+        during the first-run bootstrap wizard.
 
-        If zones already exist (i.e. setup has completed), this also runs
-        the legacy channel-sync to map any newly created channels.
+        If categories already exist (i.e. setup has completed), this also runs
+        the channel-sync to map any newly created channels.
         """
-        from synapse.services.setup_service import (
-            ChannelInfo,
-            GuildSnapshot,
-            save_guild_snapshot,
-        )
+        guild = self.get_guild(self.cfg.guild_id)
+        if guild is None:
+            logger.warning(
+                "Primary guild %d not found — skipping channel discovery",
+                self.cfg.guild_id,
+            )
+            return
 
-        for g in self.guilds:
-            if g.id != self.cfg.guild_id:
-                continue
+        # Categories first (no parent category)
+        channel_infos: list[ChannelInfo] = [
+            ChannelInfo(id=c.id, name=c.name, type="category")
+            for c in guild.categories
+        ]
 
-            # Build a rich channel snapshot
-            channel_infos: list[ChannelInfo] = []
-
-            # Categories first
-            for cat in g.categories:
-                channel_infos.append(ChannelInfo(
-                    id=cat.id,
-                    name=cat.name,
-                    type="category",
-                ))
-
-            # Text channels
-            for ch in g.text_channels:
+        # All other channel types share the same shape
+        _channel_sources = [
+            ("text_channels", "text"),
+            ("voice_channels", "voice"),
+            ("forums", "forum"),
+            ("stage_channels", "stage"),
+        ]
+        for attr, ch_type in _channel_sources:
+            for ch in getattr(guild, attr, []):
                 channel_infos.append(ChannelInfo(
                     id=ch.id,
                     name=ch.name,
-                    type="text",
+                    type=ch_type,
                     category_id=ch.category.id if ch.category else None,
                     category_name=ch.category.name if ch.category else None,
                 ))
 
-            # Voice channels
-            for vc in g.voice_channels:
-                channel_infos.append(ChannelInfo(
-                    id=vc.id,
-                    name=vc.name,
-                    type="voice",
-                    category_id=vc.category.id if vc.category else None,
-                    category_name=vc.category.name if vc.category else None,
-                ))
+        snapshot = GuildSnapshot(
+            guild_id=guild.id,
+            guild_name=guild.name,
+            channels=channel_infos,
+            afk_channel_id=guild.afk_channel.id if guild.afk_channel else None,
+        )
+        save_guild_snapshot(self.engine, snapshot)
 
-            # Forum channels
-            for fc in g.forums:
-                channel_infos.append(ChannelInfo(
-                    id=fc.id,
-                    name=fc.name,
-                    type="forum",
-                    category_id=fc.category.id if fc.category else None,
-                    category_name=fc.category.name if fc.category else None,
-                ))
-
-            # Stage channels
-            for sc in g.stage_channels:
-                channel_infos.append(ChannelInfo(
-                    id=sc.id,
-                    name=sc.name,
-                    type="stage",
-                    category_id=sc.category.id if sc.category else None,
-                    category_name=sc.category.name if sc.category else None,
-                ))
-
-            snapshot = GuildSnapshot(
-                guild_id=g.id,
-                guild_name=g.name,
-                channels=channel_infos,
-                afk_channel_id=g.afk_channel.id if g.afk_channel else None,
-            )
-            save_guild_snapshot(self.engine, snapshot)
-
-            # If zones exist, also run incremental channel-sync
-            from synapse.database.engine import run_db
-            from synapse.services.channel_service import sync_guild_channels
-
-            flat_channels = [
-                {
-                    "id": ch.id,
-                    "name": ch.name,
-                    "category_name": ch.category_name,
-                }
-                for ch in channel_infos
-                if ch.type != "category"
-            ]
-            if flat_channels:
-                mapped = await run_db(
-                    sync_guild_channels, self.engine, g.id, flat_channels,
-                )
-                if mapped:
-                    self.cache.load_all()
-                    logger.info(
-                        "Incremental channel sync: %d new channels mapped.", mapped
-                    )
-
-            return  # Only process the primary guild
+        # Sync channel metadata to the channels table
+        ch_dicts = [
+            {
+                "id": ch.id,
+                "name": ch.name,
+                "type": ch.type,
+                "category_id": ch.category_id,
+                "category_name": ch.category_name,
+                "position": 0,
+            }
+            for ch in channel_infos
+        ]
+        await run_db(sync_channels_from_snapshot, self.engine, guild.id, ch_dicts)
 
     # -----------------------------------------------------------------------
     # Detect AFK voice channels for Event Lake tagging (P4, §3B.4)
@@ -313,52 +328,52 @@ class SynapseBot(commands.Bot):
     async def _detect_afk_channels(self) -> None:
         """Auto-detect Discord's built-in AFK channel and update the lake writer."""
         afk_ids: set[int] = set()
-        for g in self.guilds:
-            if g.id != self.cfg.guild_id:
-                continue
-            if g.afk_channel:
-                afk_ids.add(g.afk_channel.id)
-                logger.info(
-                    "Detected AFK channel: #%s (ID: %d)",
-                    g.afk_channel.name, g.afk_channel.id,
-                )
+        guild = self.get_guild(self.cfg.guild_id)
+        if guild is not None and guild.afk_channel:
+            afk_ids.add(guild.afk_channel.id)
+            logger.info(
+                "Detected AFK channel: #%s (ID: %d)",
+                guild.afk_channel.name, guild.afk_channel.id,
+            )
             # TODO: Also load admin-designated non-tracked channels from settings
-            break
 
         self.lake_writer.set_afk_channels(afk_ids)
         logger.info("Event Lake AFK channel set: %s", afk_ids or "(none)")
 
     async def _audit_text_channel_access(self) -> None:
         """Log which text channels the bot can or cannot read in the primary guild."""
-        for g in self.guilds:
-            if g.id != self.cfg.guild_id:
-                continue
-
-            bot_member = g.me or g.get_member(self.user.id if self.user else 0)
-            if bot_member is None:
-                logger.warning(
-                    "Permission audit skipped: bot member not available in guild %s",
-                    g.id,
-                )
-                return
-
-            readable: list[str] = []
-            blocked: list[str] = []
-
-            for ch in g.text_channels:
-                perms = ch.permissions_for(bot_member)
-                label = f"#{ch.name} ({ch.id})"
-                if perms.view_channel and perms.read_message_history:
-                    readable.append(label)
-                else:
-                    blocked.append(label)
-
-            logger.info(
-                "Permission audit: %d readable text channels, %d blocked in guild %s",
-                len(readable), len(blocked), g.id,
+        guild = self.get_guild(self.cfg.guild_id)
+        if guild is None:
+            logger.warning(
+                "Permission audit skipped: guild %d not found",
+                self.cfg.guild_id,
             )
-            if readable:
-                logger.info("Readable text channels: %s", ", ".join(readable))
-            if blocked:
-                logger.warning("Blocked text channels: %s", ", ".join(blocked))
             return
+
+        bot_member = guild.me or guild.get_member(self.user.id if self.user else 0)
+        if bot_member is None:
+            logger.warning(
+                "Permission audit skipped: bot member not available in guild %s",
+                guild.id,
+            )
+            return
+
+        readable: list[str] = []
+        blocked: list[str] = []
+
+        for ch in guild.text_channels:
+            perms = ch.permissions_for(bot_member)
+            label = f"#{ch.name} ({ch.id})"
+            if perms.view_channel and perms.read_message_history:
+                readable.append(label)
+            else:
+                blocked.append(label)
+
+        logger.info(
+            "Permission audit: %d readable text channels, %d blocked in guild %s",
+            len(readable), len(blocked), guild.id,
+        )
+        if readable:
+            logger.debug("Readable text channels: %s", ", ".join(readable))
+        if blocked:
+            logger.debug("Blocked text channels: %s", ", ".join(blocked))

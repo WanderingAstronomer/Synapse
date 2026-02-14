@@ -1,14 +1,12 @@
 import { vitePreprocess } from '@sveltejs/vite-plugin-svelte';
+import adapterNode from '@sveltejs/adapter-node';
 
-let adapter;
-try {
-	adapter = (await import('@sveltejs/adapter-node')).default;
-} catch {
-	adapter = () => ({
-		name: 'adapter-missing',
-		adapt: async () => {}
-	});
-}
+// adapter-node is required because this dashboard uses a server-side API proxy
+// route (src/routes/api/[...path]/+server.ts) that forwards requests to the
+// FastAPI backend.  adapter-static cannot execute server routes.
+// SSR itself is disabled (ssr = false in +layout.ts) — the Node server only
+// serves the static SPA bundle and handles the /api proxy.
+const adapter = adapterNode;
 
 /** @type {import('@sveltejs/kit').Config} */
 const config = {

@@ -487,3 +487,16 @@ class TestDataSourceToggle:
         assert writer.is_source_enabled(EventType.VOICE_JOIN) is False
         assert writer.is_source_enabled(EventType.MEMBER_LEAVE) is False
         assert writer.is_source_enabled(EventType.MESSAGE_CREATE) is True
+
+    def test_emoji_count_regex_improvements(self):
+        """Test improved regex logic for custom emojis and edge cases."""
+        # Custom emoji
+        assert extract_message_metadata("Hi <:custom:123>", 0, False)["emoji_count"] == 1
+        # Animated custom emoji
+        assert extract_message_metadata("Wow <a:anim:456>", 0, False)["emoji_count"] == 1
+        # Mixed standard (shortcode) and custom
+        assert extract_message_metadata(":smile: <a:anim:456>", 0, False)["emoji_count"] == 2
+        # Edge case: raw colons shouldn't count
+        assert extract_message_metadata("Time: 12:00:30", 0, False)["emoji_count"] == 0
+        # Edge case: triple colon
+        assert extract_message_metadata(":::", 0, False)["emoji_count"] == 0

@@ -32,15 +32,23 @@ _jsonb_sqlite_registered = False
 
 
 def _register_jsonb_sqlite_compat():
-    """Register SQLite compilation for PG JSONB type (idempotent)."""
+    """Register SQLite compilation for PG JSONB type (idempotent).
+
+    Also maps BigInteger → INTEGER so autoincrement works on SQLite.
+    """
     global _jsonb_sqlite_registered
     if _jsonb_sqlite_registered:
         return
+    from sqlalchemy import BigInteger
     from sqlalchemy.ext.compiler import compiles
 
     @compiles(PG_JSONB, "sqlite")
     def _compile_jsonb_as_text(type_, compiler, **kw):
         return "TEXT"
+
+    @compiles(BigInteger, "sqlite")
+    def _compile_bigint_as_integer(type_, compiler, **kw):
+        return "INTEGER"
 
     _jsonb_sqlite_registered = True
 
@@ -53,8 +61,17 @@ def db_engine() -> Engine:
     """Create an in-memory SQLite engine with all Synapse tables.
 
     JSONB columns are transparently mapped to TEXT for SQLite compatibility.
+    Uses StaticPool so all threads share the same in-memory database
+    (required by ``asyncio.to_thread`` used in the rate limiter).
     """
-    engine = create_engine("sqlite://", echo=False)
+    from sqlalchemy.pool import StaticPool
+
+    engine = create_engine(
+        "sqlite://",
+        echo=False,
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
     Base.metadata.create_all(engine)
     return engine
 
@@ -70,18 +87,27 @@ def db_session(db_engine: Engine):
 @pytest.fixture
 def admin_token():
     """Generate a valid admin JWT for use in API integration tests."""
+    return make_admin_token()
+
+
+def make_admin_token(sub: str = "99999", username: str = "FixtureAdmin") -> str:
+    """Create an admin JWT.  Usable as both a fixture and a factory function."""
     import jwt
 
     from synapse.api.deps import JWT_ALGORITHM, JWT_SECRET
 
     return jwt.encode(
-        {"sub": "99999", "username": "FixtureAdmin", "is_admin": True},
+        {"sub": sub, "username": username, "is_admin": True},
         JWT_SECRET,
         algorithm=JWT_ALGORITHM,
     )
 
 
 @pytest.fixture
-def auth_headers(admin_token: str) -> dict[str, str]:
-    """Authorization headers containing a valid admin JWT."""
-    return {"Authorization": f"Bearer {admin_token}"}
+def client():
+    """Create a FastAPI TestClient with raise_server_exceptions=False."""
+    from fastapi.testclient import TestClient
+
+    from synapse.api.main import app
+
+    return TestClient(app, raise_server_exceptions=False)

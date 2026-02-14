@@ -5,8 +5,6 @@ synapse.services.reconciliation_service — Counter Reconciliation
 Weekly job that validates ``event_counters`` against raw ``event_lake`` rows
 and corrects drift if found.
 
-Reference: PLAN_OF_ATTACK_P4.md Task #12 / 03B_DATA_LAKE.md §3B.6
-
 How it works:
     1. Query ``COUNT(*)`` from ``event_lake`` grouped by (user_id, event_type)
        for the current 'lifetime' period.
@@ -55,11 +53,10 @@ def reconcile_counters(engine: Engine) -> dict:
             for row in truth_rows
         }
 
-        # Current counters for period='lifetime', zone_id=0
+        # Current counters for period='lifetime'
         counter_q = (
             select(EventCounter)
             .where(EventCounter.period == "lifetime")
-            .where(EventCounter.zone_id == 0)
         )
         counter_rows = session.scalars(counter_q).all()
         counter_map: dict[tuple[int, str], EventCounter] = {
@@ -88,9 +85,9 @@ def reconcile_counters(engine: Engine) -> dict:
                 session.execute(
                     text("""
                         INSERT INTO event_counters
-                            (user_id, event_type, zone_id, period, count)
-                        VALUES (:uid, :etype, 0, 'lifetime', :count)
-                        ON CONFLICT (user_id, event_type, zone_id, period)
+                            (user_id, event_type, period, count)
+                        VALUES (:uid, :etype, 'lifetime', :count)
+                        ON CONFLICT (user_id, event_type, period)
                         DO UPDATE SET count = :count
                     """),
                     {"uid": user_id, "etype": event_type, "count": actual},
@@ -113,7 +110,6 @@ def reconcile_counters(engine: Engine) -> dict:
                         SET count = 0
                         WHERE user_id = :uid
                           AND event_type = :etype
-                          AND zone_id = 0
                           AND period = 'lifetime'
                     """),
                     {"uid": user_id, "etype": event_type},

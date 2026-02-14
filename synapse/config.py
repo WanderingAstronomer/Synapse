@@ -46,9 +46,6 @@ class SynapseConfig:
     bot_prefix: str
     guild_id: int  # Primary guild snowflake (for seeding & scoping)
 
-    # Dashboard
-    dashboard_port: int
-
     # Admin / Hardened Access
     admin_role_id: int  # Discord role required for admin commands/dashboard
 
@@ -90,7 +87,6 @@ def load_config(path: str | Path = "config.yaml") -> SynapseConfig:
         community_motto=raw["community_motto"],
         bot_prefix=raw["bot_prefix"],
         guild_id=int(raw["guild_id"]),
-        dashboard_port=int(raw["dashboard_port"]),
         admin_role_id=int(raw["admin_role_id"]),
         announce_channel_id=(
             int(raw["announce_channel_id"]) if raw.get("announce_channel_id") else None

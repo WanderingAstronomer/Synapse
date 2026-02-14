@@ -13,14 +13,8 @@ import pytest
 
 from synapse.database.models import InteractionType
 from synapse.engine.events import BASE_STARS, BASE_XP, SynapseEvent
-from synapse.engine.reward import (
-    AntiGamingTracker,
-    RewardResult,
-    apply_anti_gaming_stars,
-    apply_xp_caps,
-    calculate_quality_modifier,
-    calculate_reward,
-)
+from synapse.engine.quality import calculate_quality_modifier
+from synapse.engine.reward import RewardResult, calculate_reward
 
 
 # ---------------------------------------------------------------------------
@@ -31,16 +25,12 @@ def mock_cache():
     """Create a mock ConfigCache with sensible defaults."""
     cache = MagicMock()
 
-    # Default: no zone → returns None for zone lookup
-    cache.get_zone_for_channel.return_value = None
-
     # Default multipliers: both 1.0
-    cache.get_multipliers.return_value = (1.0, 1.0)
+    cache.resolve_multipliers.return_value = (1.0, 1.0)
 
     # Default settings — return the fallback default for any key
     cache.get_int.side_effect = lambda k, d=0: d
     cache.get_float.side_effect = lambda k, d=0.0: d
-    cache.get_str.side_effect = lambda k, d="": d
     cache.get_bool.side_effect = lambda k, d=False: d
     cache.get_setting.side_effect = lambda k, d=None: d
 
@@ -161,49 +151,6 @@ class TestQualityModifier:
 
 
 # ---------------------------------------------------------------------------
-# Anti-Gaming
-# ---------------------------------------------------------------------------
-class TestAntiGaming:
-    def test_self_reaction_blocked(self):
-        event = SynapseEvent(
-            user_id=1001,
-            event_type=InteractionType.REACTION_RECEIVED,
-            channel_id=1,
-            guild_id=1,
-            metadata={"reactor_id": 1001, "unique_reactor_count": 1},
-        )
-        stars = apply_anti_gaming_stars(event, 5)
-        assert stars == 0  # Self-reactions should yield 0 stars
-
-    def test_unique_reactor_weighting(self, reaction_event):
-        # With 5 unique reactors, should get good star value
-        stars = apply_anti_gaming_stars(reaction_event, 10)
-        assert stars > 0
-
-    def test_diminishing_returns_tracker(self):
-        tracker = AntiGamingTracker()
-        user_id = 1001
-        target_id = 2001
-
-        # First few interactions should pass
-        for _ in range(3):
-            factor = tracker.get_diminishing_factor(user_id, target_id)
-            assert factor > 0
-
-    def test_reaction_velocity_cap(self):
-        event = SynapseEvent(
-            user_id=1001,
-            event_type=InteractionType.REACTION_RECEIVED,
-            channel_id=1,
-            guild_id=1,
-            metadata={"unique_reactor_count": 1},
-        )
-        xp = apply_xp_caps(event, 100)
-        # With only 1 unique reactor, XP should be capped/reduced
-        assert xp <= 100
-
-
-# ---------------------------------------------------------------------------
 # Full Pipeline
 # ---------------------------------------------------------------------------
 class TestCalculateReward:
@@ -236,20 +183,17 @@ class TestCalculateReward:
         assert isinstance(result.leveled_up, bool)
         assert isinstance(result.gold_bonus, int)
 
-    def test_zone_multiplier_applied(self, message_event, mock_cache):
-        # Configure zone with 2x XP multiplier
-        zone = MagicMock()
-        zone.id = 1
-        mock_cache.get_zone_for_channel.return_value = zone
-        mock_cache.get_multipliers.return_value = (2.0, 1.0)
+    def test_channel_override_multiplier_applied(self, message_event, mock_cache):
+        # Configure channel override with 2x XP multiplier
+        mock_cache.resolve_multipliers.return_value = (2.0, 1.0)
 
         result_2x = calculate_reward(message_event, mock_cache)
 
         # Now with 1x multiplier
-        mock_cache.get_multipliers.return_value = (1.0, 1.0)
+        mock_cache.resolve_multipliers.return_value = (1.0, 1.0)
         result_1x = calculate_reward(message_event, mock_cache)
 
-        # 2x zone should produce more XP (approximately 2x)
+        # 2x multiplier should produce more XP (approximately 2x)
         assert result_2x.xp >= result_1x.xp
 
     def test_voice_tick_produces_result(self, mock_cache):

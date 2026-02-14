@@ -6,7 +6,9 @@ One-shot migration utility that reads the legacy ``activity_log`` table and
 populates ``event_counters`` so the new counter-based achievement engine
 has historical data from day one.
 
-Reference: PLAN_OF_ATTACK_P4.md Task #13
+**PostgreSQL-only:** This service uses the ``GREATEST()`` function in the
+UPSERT query, which is not available in SQLite. Production deployments use
+PostgreSQL; integration tests run in dry-run mode to validate schema correctness.
 
 Mapping from legacy ``activity_log.event_type`` to Event Lake types:
     MESSAGE          → message_create
@@ -83,9 +85,9 @@ def backfill_counters_from_activity_log(
                 session.execute(
                     text("""
                         INSERT INTO event_counters
-                            (user_id, event_type, zone_id, period, count)
-                        VALUES (:uid, :etype, 0, 'lifetime', :count)
-                        ON CONFLICT (user_id, event_type, zone_id, period)
+                            (user_id, event_type, period, count)
+                        VALUES (:uid, :etype, 'lifetime', :count)
+                        ON CONFLICT (user_id, event_type, period)
                         DO UPDATE SET count = GREATEST(
                             event_counters.count,
                             :count
