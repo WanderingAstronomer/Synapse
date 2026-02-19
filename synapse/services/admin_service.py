@@ -186,6 +186,58 @@ def _audited_delete(
         return True
 
 
+def _audited_upsert(
+    engine,
+    model_cls: type,
+    lookup_kwargs: dict[str, Any],
+    *,
+    table_name: str,
+    actor_id: int,
+    ip_address: str | None = None,
+    **values: Any,
+) -> Any:
+    """Generic audited UPSERT: get by lookup -> update or create -> log -> commit.
+
+    Returns the updated/created (expunged) object.
+    """
+    with Session(engine, expire_on_commit=False) as session:
+        # Construct lookup query
+        stmt = select(model_cls)
+        for key, val in lookup_kwargs.items():
+            stmt = stmt.where(getattr(model_cls, key) == val)
+        
+        obj = session.scalar(stmt)
+        before = _row_to_dict(obj)
+        action = "UPDATE" if obj else "CREATE"
+
+        if not obj:
+            # Create new instance with merged lookup + values
+            obj = model_cls(**{**lookup_kwargs, **values})
+            session.add(obj)
+        else:
+            # Update existing instance
+            for key, val in values.items():
+                if hasattr(obj, key):
+                    setattr(obj, key, val)
+        
+        session.flush()
+        _log_admin_action(
+            session,
+            actor_id=actor_id,
+            action_type=action,
+            target_table=table_name,
+            target_id=str(obj.id),
+            before=before,
+            after=_row_to_dict(obj),
+            ip_address=ip_address,
+        )
+        notify_before_commit(session, table_name)
+        session.commit()
+        session.refresh(obj)
+        session.expunge(obj)
+        return obj
+
+
 # ---------------------------------------------------------------------------
 # Channel Type Default CRUD
 # ---------------------------------------------------------------------------
@@ -201,48 +253,19 @@ def upsert_type_default(
     actor_id: int,
 ) -> ChannelTypeDefault:
     """Create or update a channel type default rule."""
-    with Session(engine, expire_on_commit=False) as session:
-        existing = session.scalar(
-            select(ChannelTypeDefault).where(
-                ChannelTypeDefault.guild_id == guild_id,
-                ChannelTypeDefault.channel_type == channel_type,
-                ChannelTypeDefault.event_type == event_type,
-            )
-        )
-        before = _row_to_dict(existing)
-
-        if existing:
-            existing.xp_multiplier = xp_multiplier
-            existing.star_multiplier = star_multiplier
-            action = "UPDATE"
-            obj = existing
-        else:
-            obj = ChannelTypeDefault(
-                guild_id=guild_id,
-                channel_type=channel_type,
-                event_type=event_type,
-                xp_multiplier=xp_multiplier,
-                star_multiplier=star_multiplier,
-            )
-            session.add(obj)
-            before = None
-            action = "CREATE"
-
-        session.flush()
-        _log_admin_action(
-            session,
-            actor_id=actor_id,
-            action_type=action,
-            target_table="channel_type_defaults",
-            target_id=str(obj.id),
-            before=before,
-            after=_row_to_dict(obj),
-        )
-        notify_before_commit(session, "channel_type_defaults")
-        session.commit()
-        session.refresh(obj)
-        session.expunge(obj)
-        return obj
+    return _audited_upsert(
+        engine,
+        ChannelTypeDefault,
+        {
+            "guild_id": guild_id,
+            "channel_type": channel_type,
+            "event_type": event_type,
+        },
+        table_name="channel_type_defaults",
+        actor_id=actor_id,
+        xp_multiplier=xp_multiplier,
+        star_multiplier=star_multiplier,
+    )
 
 
 def delete_type_default(engine, *, default_id: int, actor_id: int) -> bool:
@@ -269,50 +292,20 @@ def upsert_channel_override(
     actor_id: int,
 ) -> ChannelOverride:
     """Create or update a per-channel override."""
-    with Session(engine, expire_on_commit=False) as session:
-        existing = session.scalar(
-            select(ChannelOverride).where(
-                ChannelOverride.guild_id == guild_id,
-                ChannelOverride.channel_id == channel_id,
-                ChannelOverride.event_type == event_type,
-            )
-        )
-        before = _row_to_dict(existing)
-
-        if existing:
-            existing.xp_multiplier = xp_multiplier
-            existing.star_multiplier = star_multiplier
-            existing.reason = reason
-            action = "UPDATE"
-            obj = existing
-        else:
-            obj = ChannelOverride(
-                guild_id=guild_id,
-                channel_id=channel_id,
-                event_type=event_type,
-                xp_multiplier=xp_multiplier,
-                star_multiplier=star_multiplier,
-                reason=reason,
-            )
-            session.add(obj)
-            before = None
-            action = "CREATE"
-
-        session.flush()
-        _log_admin_action(
-            session,
-            actor_id=actor_id,
-            action_type=action,
-            target_table="channel_overrides",
-            target_id=str(obj.id),
-            before=before,
-            after=_row_to_dict(obj),
-        )
-        notify_before_commit(session, "channel_overrides")
-        session.commit()
-        session.refresh(obj)
-        session.expunge(obj)
-        return obj
+    return _audited_upsert(
+        engine,
+        ChannelOverride,
+        {
+            "guild_id": guild_id,
+            "channel_id": channel_id,
+            "event_type": event_type,
+        },
+        table_name="channel_overrides",
+        actor_id=actor_id,
+        xp_multiplier=xp_multiplier,
+        star_multiplier=star_multiplier,
+        reason=reason,
+    )
 
 
 def delete_channel_override(engine, *, override_id: int, actor_id: int) -> bool:

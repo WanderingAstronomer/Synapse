@@ -66,6 +66,23 @@ class InteractionType(enum.StrEnum):
     ACHIEVEMENT_EARNED = "ACHIEVEMENT_EARNED"
     VOICE_JOIN = "VOICE_JOIN"
     VOICE_LEAVE = "VOICE_LEAVE"
+    POLL_VOTE = "POLL_VOTE"
+
+
+class ScalingCurve(enum.StrEnum):
+    """Supported mathematical curves for reward scaling."""
+    LINEAR = "linear"
+    LOGARITHMIC = "logarithmic"
+    EXPONENTIAL = "exponential"
+    STEP = "step"
+
+
+class RulePriority(int, enum.Enum):
+    """Priority levels for reward rules."""
+    LOW = 10
+    DEFAULT = 50
+    HIGH = 100
+    OVERRIDE = 1000
 
 
 class TriggerType(enum.StrEnum):
@@ -180,6 +197,40 @@ class UserStats(Base):
 
     def __repr__(self) -> str:
         return f"<UserStats user={self.user_id} season={self.season_id}>"
+
+
+# ---------------------------------------------------------------------------
+# Reward Firewall — Composable Rules
+# ---------------------------------------------------------------------------
+class RewardRule(Base):
+    """
+    Administratively defined 'Firewall Rule' for Discord interactions.
+    Matches events via predicates and yields scaled outcomes.
+    """
+    __tablename__ = "reward_rules"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    guild_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    priority: Mapped[int] = mapped_column(Integer, default=50)
+
+    # List of atomic predicates: [{"field": "len", "op": ">=", "val": 100}, ...]
+    predicates: Mapped[dict] = mapped_column(JSONB, server_default="[]")
+
+    # List of reward outcomes: [{"type": "XP", "base": 10, "curve": "logarithmic"}, ...]
+    outcomes: Mapped[dict] = mapped_column(JSONB, server_default="[]")
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+  )
+
+    __table_args__ = (
+        Index("idx_rules_guild_priority", "guild_id", "priority"),
+    )
 
 
 # ---------------------------------------------------------------------------

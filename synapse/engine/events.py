@@ -64,4 +64,7 @@ class SynapseEvent:
     guild_id: int
     source_event_id: str | None = None
     metadata: dict = field(default_factory=dict)
+    # The 'Context' bucket: holds state needed for scaling (e.g. daily message counts, user level).
+    # Populated by the service layer before pipeline entry.
+    context: dict = field(default_factory=dict)
     timestamp: datetime = field(default_factory=datetime.now)

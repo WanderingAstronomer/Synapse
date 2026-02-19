@@ -1,5 +1,9 @@
 # Code Minimalism Audit — Synapse
 
+> ⚠️ **Reference Document Only.** Items in this audit were addressed during the pruning phase.
+> See `TRACKER_pruning_for_capture_firewall.md` for resolution status.
+> Do not re-open pruning work based on this document alone — verify against current codebase first.
+
 **Date**: 2026-02-14  
 **Scope**: Full codebase — engine, services, bot/cogs, API, database/config, tests, infrastructure
 
@@ -611,3 +615,56 @@ The Synapse codebase is well-structured overall, with a clear separation of conc
 | A11-A12 | Hardcoded metadata + custom StaticFiles | Frontend ownership discussion |
 
 **Total estimated removable lines: ~750-800**
+
+---
+
+## Consolidated Method & Debt Notes (Merged)
+
+### A. Audit Method Snapshot (from deprecated planning doc)
+
+This audit was performed using a layer-by-layer sweep across:
+- `synapse/engine/`
+- `synapse/services/`
+- `synapse/bot/`
+- `synapse/api/`
+- `synapse/database/` + config/constants
+- `tests/` + infra files
+
+Review criteria used:
+- dead code / YAGNI
+- over-engineering
+- duplication
+- stale contracts/constants
+- guardrail violations
+
+### B. Operational Debt Register (from deprecated TECHNICAL_DEBT.md)
+
+The previous debt file is now superseded by this section. Items below should be
+treated as "re-verify and close" checkpoints instead of a separate source of truth.
+
+1. `send_notify()` transaction ordering race window
+  - Verify NOTIFY dispatch is transaction-aligned where required.
+
+2. PG LISTEN reconnect bounded retry / degraded state signaling
+  - Confirm listener failure mode is explicit and observable.
+
+3. DB pool timeout safety
+  - Confirm pool timeout is explicitly configured to avoid indefinite waits.
+
+4. Detached ORM return-value risk after `expunge()`
+  - Confirm call sites cannot trigger detached relationship access.
+
+5. Graceful listener shutdown semantics
+  - Confirm bot shutdown cleanly terminates cache listener thread.
+
+6. Cooldown map pruning growth control
+  - Confirm bounded memory behavior for long-lived bot uptime.
+
+7. Health/readiness endpoint coverage
+  - Confirm production probes reflect DB/listener/bot liveness realistically.
+
+8. Structured logging consistency
+  - Confirm major event and exception paths include context-rich fields.
+
+This section replaces the separate technical debt tracker to keep one canonical
+audit/debt artifact in agent resources.

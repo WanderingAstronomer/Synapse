@@ -1,0 +1,221 @@
+Anti-Gaming Heuristics for Community Reward
+Systems
+Common abuse patterns: Community platforms with “likes”, upvotes or reaction-based rewards often see
+similar gaming behavior. For example, studies of StackOverflow found schemes like voting rings (small
+groups upvoting each other’s posts repeatedly) as the most prevalent fraud 1 2 . Other patterns include
+bounty gaming (coordinating around question bounties), revenge downvoting (mass downvotes by
+colluding users), badge/edit gaming (making trivial edits or low-effort posts solely to earn points) 1 , and
+“closing rings” (colluding to close or attack a target’s content). Analogous behaviors occur in forums or
+chat servers: e.g., reaction farming, where users create or upvote each other’s posts en masse to boost
+reaction counts, and reply-chain inflation, where a few users repeatedly reply to each other to inflate
+thread length or visibility. Low-effort content spam (very short or duplicate posts, repeated links/keywords)
+often underlies these schemes. In short, mutual or repeated interactions among a small set of accounts –
+especially when tightly timed or content-light – are key red flags 1 2 .
+Explainable heuristics: We rely on simple rules that count events or compare ratios, rather than opaque
+ML. Common rules include:
+• Reciprocal/interlinked votes/reactions: If user A has upvoted or reacted to user B’s content many
+times and B has done likewise to A, flag them. For instance, one can query the vote table to find pairs
+with mutual voting counts above a threshold. For example:
+
+-- Find user pairs who have each given the other >10 upvotes
+SELECT a.user1, a.user2
+FROM (
+SELECT voter AS user1, post_author AS user2, COUNT(*) AS votes12
+FROM votes GROUP BY voter, post_author
+) a
+JOIN (
+SELECT voter AS user2, post_author AS user1, COUNT(*) AS votes21
+FROM votes GROUP BY voter, post_author
+) b ON a.user1 = b.user1 AND a.user2 = b.user2
+WHERE a.votes12 > 10 AND b.votes21 > 10;
+This SQL finds user1/user2 pairs who have each given the other more than 10 votes. In Python you could
+run such queries with psycopg2 or SQLAlchemy, then mark those accounts for review. The idea is that
+truly popular content will have many distinct supporters, whereas colluders show up in each other’s
+histories 3 4 .
+• Unique-voter ratio (“honesty” score): Compute for each user the fraction of unique supporters. If
+Alice has 100 total upvotes but only 5 distinct voters, that ratio (0.05) is very low, suggesting a ring.
+
+1
+
+In PostgreSQL one could do:
+
+SELECT author, COUNT(*) AS total_votes,
+COUNT(DISTINCT voter) AS uniq_voters,
+(COUNT(DISTINCT voter)::float / COUNT(*)) AS honesty_ratio
+FROM votes
+GROUP BY author
+HAVING (COUNT(DISTINCT voter)::float / COUNT(*)) < 0.5;
+This flags authors whose upvotes come repeatedly from a small circle (low honesty_ratio )
+
+4
+
+.A
+
+similar check applies to reactions: e.g. “User X reacted to posts by user Y > N times while Y reacted to
+X > N times.”
+• Rate-limiting and burst detection: Simple time-based rules catch spam bursts. For example, block
+or rate-limit if a user posts more than k messages or reactions in t seconds. Or if a user upvotes
+many different posts (or the same user’s posts) in quick succession. For instance, an AutoMod might
+enforce: “no more than 5 mentions or links per message” or “no more than 10 reactions added in 60
+seconds.” These instantaneous filters help stop obvious spam farms.
+• Low-effort or duplicate content filtering: Posts or replies that are extremely short (e.g. <10
+characters) or identical to each other are often spammy. A rule can check if a user’s new post has
+minimal text, too many links/emojis, or matches text from their recent posts. Example pseudocode:
+
+if len(message.content) < 15 or message.content in recent_posts_by(user):
+flag_as_low_effort(user, message.id)
+Such content-based heuristics – akin to Akismet rules – identify “point farming” posts like one-word
+answers or repeated canned phrases 5 .
+• Reply-chain anomalies: If a thread’s replies come almost entirely from 2–3 accounts (e.g. A replies
+to B back-and-forth 20 times), that suggests manipulation. One can compute per-thread:
+
+reply_count = total replies;
+distinct_authors = number of unique repliers;
+if reply_count > 20 and reply_count / distinct_authors > 5:
+flag thread as inflated
+In SQL:
+SELECT thread_id, COUNT(*) AS replies,
+COUNT(DISTINCT author) AS authors,
+(COUNT(*)::float / COUNT(DISTINCT author)) AS replies_per_user
+FROM messages
+
+2
+
+GROUP BY thread_id
+HAVING COUNT(*) > 20 AND (COUNT(*)::float / COUNT(DISTINCT author)) > 5;
+This would find threads where a few users generate most replies.
+• Account/metadata checks: Detect sockpuppets or farms by account metadata. E.g. many accounts
+created around the same time, or sharing IP/geolocation patterns, that then vote in lockstep. While
+these are not about content, logging IP or join timestamps and flagging suspicious clusters is useful.
+(One simple rule: if multiple accounts created on same minute give each other rewards, assume
+collusion.)
+Each rule is transparent and threshold-based. Combining several rules (e.g. both high mutual votes and low
+content quality) increases confidence. In practice we implement these checks as Python scripts or database
+jobs acting on logged telemetry data (messages, reactions, votes, user metadata).
+Implementation (Python/Postgres example): A typical telemetry system logs every interaction: e.g. a
+votes table with columns (voter_id, post_id, post_author_id, timestamp) , a reactions
+table (reactor_id, message_id, message_author_id, emoji, timestamp) , etc. We can then use
+Python to periodically query these tables. For instance, in Python with psycopg2 we might do:
+
+cursor.execute("""
+SELECT a.user1, a.user2, a.votes12, b.votes21
+FROM (
+SELECT voter AS user1, post_author AS user2, COUNT(*) AS votes12
+FROM votes
+GROUP BY voter, post_author
+) a
+JOIN (
+SELECT voter AS user2, post_author AS user1, COUNT(*) AS votes21
+FROM votes
+GROUP BY voter, post_author
+) b ON a.user1 = b.user1 AND a.user2 = b.user2
+WHERE a.votes12 > 10 AND b.votes21 > 10;
+""")
+suspect_pairs = cursor.fetchall()
+for user1, user2, cnt1, cnt2 in suspect_pairs:
+mark_as_suspicious(user1, user2)
+# e.g. log or enqueue review
+Similarly, we might run an SQL query to find low honesty_ratio users:
+
+cursor.execute("""
+SELECT author, (COUNT(DISTINCT voter)::float / COUNT(*)) AS honesty
+FROM votes
+GROUP BY author
+HAVING (COUNT(DISTINCT voter)::float / COUNT(*)) < 0.2;
+
+3
+
+""")
+for author, honesty in cursor.fetchall():
+if honesty < 0.1:
+alert("User {} has only {:.1%} unique voters".format(author, honesty))
+Or check content lengths in Python before inserting to the database:
+
+if len(content_text) < 15:
+# Immediately reject or flag short post
+log_rejection(user_id, content_text)
+In a PostgreSQL-centered telemetry, one could also use database triggers or stored procedures to maintain
+rolling counters (e.g. count of posts per user per minute) and enforce immediate throttling. Python scripts
+can run daily/weekly to compute graph metrics: e.g., use NetworkX on a dump of the (voter,
+post_author) edges to find dense subgraphs of collusion. All logic remains clear-cut: counts, ratios,
+thresholds and simple statistics (no opaque ML here).
+Real-time suppression vs. batch audit: Heuristic defenses often combine both. Real-time filters act
+instantly on each message or action: for example, Discord’s AutoMod can block a message with >X
+mentions or flagged keywords immediately 6 7 (though that’s for spam content, it illustrates instant
+blocking). Similarly, a bot could immediately mute a user who sends >5 messages in 10 seconds. These onthe-fly rules prevent obvious spam from cluttering the forum. The trade-off is occasional false blocks (e.g. a
+friendly rapid back-and-forth) and the need for very simple checks (since complex computation per
+message is costly).
+Batch/audit mode instead analyzes stored logs periodically. For example, StackExchange runs an hourly
+batch job (“serial voting script”) that scans voting histories and reverses suspicious vote rings 8 . This
+allows heavier checks (like comparing totals vs. uniques or community clustering) without slowing down live
+usage. The drawback is latency: cheaters gain points or disrupt conversation until the next scan. In practice,
+a mix is ideal: real-time rate-limits and spam filters to block obvious abuse immediately, plus scheduled
+analytics (daily or weekly) that run graph queries and flag accounts for moderator review. Automated alerts
+from batch jobs can then prompt suspensions or content removals after human vetting.
+Case studies & research: Several community platforms document these issues. In technical Q&A sites,
+Mazloomzadeh et al. identified exactly the patterns above and proposed algorithms to catch them 1 9 .
+They reported that about 60–80% of users flagged by their heuristics later lost reputation due to system
+reversals 10 , showing effectiveness. On Reddit and other forums, similar approaches apply. For instance,
+one method builds a HyperLogLog counter per user to estimate the number of unique upvoters; the
+“voting_honesty” ratio (unique_upvoters/total_upvotes) tends toward 1 for normal users but near 0 for
+colluders 4 . This ratio-based heuristic quickly highlights accounts whose popularity comes from a small
+clique. Real-world moderation similarly warns and bans coordinated voting. StackExchange’s serial-vote
+script (unknown thresholds) automatically reverses vote rings within an hour 8 . In Discord communities,
+moderation bots often include anti-spam modules to throttle rapid messages or repeated reactions.
+
+4
+
+In summary, transparent anti-gaming rules include detecting tight clusters of mutual rewards, unusual
+timing patterns, and content anomalies. These can be implemented with straightforward SQL queries and
+Python checks on your telemetry tables. Combining immediate safeguards (e.g. rate limits, keyword filters)
+with periodic audits (graph/rate analytics on logs) balances prompt blocking against deeper detection. The
+cited studies and tools show that even simple, deterministic heuristics can catch a large fraction of collusion
+without relying on black-box methods 1 4 8 .
+Sources: Research on community reputation fraud 1
+vote reversal 8 ; Discord AutoMod documentation 6
+preventive rules outlined above.
+
+1
+
+3
+
+5
+
+9
+
+10
+
+9
+7
+
+4 ; StackExchange meta discussion of serial. These sources illustrate the abuse patterns and
+
+Stack Overflow Reputation And Its Misuse
+
+https://www.i-programmer.info/news/99-professional/15020-stack-overflow-reputation-and-its-misuse.html
+2
+
+[2111.07101v2] Reputation Gaming in Stack Overflow
+
+https://ar5iv.org/pdf/2111.07101v2
+4
+
+Detecting Reddit Voting Rings Using This Weird Little Data Trick - OpenSource Connections
+
+https://opensourceconnections.com/blog/2013/10/14/detecting-reddit-voting-rings-using-hyperloglog-counters/
+6
+
+7
+
+Auto Moderation in Discord
+
+https://discord.com/safety/auto-moderation-in-discord
+8
+
+What is serial voting and how does it affect me? - Meta Stack Exchange
+
+https://meta.stackexchange.com/questions/126829/what-is-serial-voting-and-how-does-it-affect-me
+
+5
+
+
