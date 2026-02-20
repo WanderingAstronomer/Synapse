@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import time
 from collections import defaultdict
+from collections.abc import Callable
 from threading import Lock
 
 from synapse.database.models import InteractionType
@@ -25,28 +26,25 @@ class AntiGamingTracker:
     Thread-safe. Entries expire after 24 hours.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, time_provider: Callable[[], float] | None = None) -> None:
         self._lock = Lock()
         # (reactor_id, target_user_id) → list of timestamps
         self._pair_reactions: dict[tuple[int, int], list[float]] = defaultdict(list)
-        self._last_cleanup = time.time()
+        self._last_cleanup = (time_provider or time.time)()
+        self._time = time_provider or time.time
 
-    def is_pair_capped(
-        self, reactor_id: int, target_user_id: int, max_per_day: int = 3
-    ) -> bool:
+    def is_pair_capped(self, reactor_id: int, target_user_id: int, max_per_day: int = 3) -> bool:
         """Check if reactor has hit the per-user per-target cap (§5.7.2).
 
-        Returns True if capped (should produce 0 stars).
+        Returns True if capped (no rewards).
         """
-        now = time.time()
+        now = self._time()
         cutoff = now - 86400  # 24 hours
 
         with self._lock:
             self._maybe_cleanup(now)
             key = (reactor_id, target_user_id)
-            self._pair_reactions[key] = [
-                t for t in self._pair_reactions[key] if t > cutoff
-            ]
+            self._pair_reactions[key] = [t for t in self._pair_reactions[key] if t > cutoff]
             if len(self._pair_reactions[key]) >= max_per_day:
                 return True
             self._pair_reactions[key].append(now)
@@ -58,80 +56,44 @@ class AntiGamingTracker:
             return
         self._last_cleanup = now
         cutoff = now - 86400
-        to_delete = [
-            k
-            for k, v in self._pair_reactions.items()
-            if all(t <= cutoff for t in v)
-        ]
+        to_delete = [k for k, v in self._pair_reactions.items() if all(t <= cutoff for t in v)]
         for k in to_delete:
             del self._pair_reactions[k]
 
-    def get_diminishing_factor(
-        self, reactor_id: int, target_user_id: int
-    ) -> float:
+    def reset(self) -> None:
+        """Clear all tracked state. Use in test fixtures to prevent cross-test pollution."""
+        with self._lock:
+            self._pair_reactions.clear()
+            self._last_cleanup = self._time()
+
+    def get_diminishing_factor(self, reactor_id: int, target_user_id: int) -> float:
         """Return a diminishing factor (0.0–1.0) for repeated user-pair interactions.
 
         Each call records an interaction.  The factor decreases as the same pair
         interacts more within the 24-hour window.  Formula: 1 / (1 + count).
         """
-        now = time.time()
+        now = self._time()
         cutoff = now - 86400
 
         with self._lock:
             self._maybe_cleanup(now)
             key = (reactor_id, target_user_id)
-            self._pair_reactions[key] = [
-                t for t in self._pair_reactions[key] if t > cutoff
-            ]
+            self._pair_reactions[key] = [t for t in self._pair_reactions[key] if t > cutoff]
             count = len(self._pair_reactions[key])
             self._pair_reactions[key].append(now)
             return 1.0 / (1.0 + count)
 
 
-# Module-level default instance (tests can inject their own)
+# Module-level default instance used by functions that accept an optional tracker.
+# Production code uses this singleton for its sliding-window state.
+# Tests should always pass an explicit AntiGamingTracker() to avoid cross-test
+# state pollution; the reset() method is available for fixture teardown.
 _default_anti_gaming = AntiGamingTracker()
 
 
 # ---------------------------------------------------------------------------
 # Anti-gaming stage functions
 # ---------------------------------------------------------------------------
-
-def apply_anti_gaming_stars(
-    event: SynapseEvent,
-    base_stars: int,
-    *,
-    tracker: AntiGamingTracker | None = None,
-) -> int:
-    """Adjust star award after anti-gaming checks for REACTION_RECEIVED.
-
-    Returns adjusted stars.  For non-reaction events, returns base_stars unchanged.
-    """
-    if event.event_type != InteractionType.REACTION_RECEIVED:
-        return base_stars
-
-    _tracker = tracker or _default_anti_gaming
-    m = event.metadata
-
-    # Self-reaction filter (§5.7.4)
-    if m.get("reactor_id") == event.user_id:
-        return 0
-
-    # Unique-reactor weighting (§5.7.1)
-    unique = m.get("unique_reactor_count", 1)
-    stars = min(base_stars, unique)
-
-    # Per-user per-target cap (§5.7.2)
-    reactor_id = m.get("reactor_id")
-    if reactor_id is not None and _tracker.is_pair_capped(
-        reactor_id, event.user_id
-    ):
-        return 0
-
-    # Diminishing returns above 10 unique reactors (§5.7.3)
-    if unique > 10:
-        stars = 10 + ((unique - 10) // 2)
-
-    return max(stars, 0)
 
 
 def apply_anti_gaming_xp(event: SynapseEvent, base_xp: int) -> int:

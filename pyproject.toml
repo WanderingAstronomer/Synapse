@@ -6,15 +6,13 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "discord-py>=2.6.4",
-    "psycopg2-binary>=2.9.11",
+    "psycopg[binary,pool]>=3.2.0",
     "python-dotenv>=1.2.1",
     "pyyaml>=6.0.3",
-    "sqlalchemy>=2.0.46",
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.34.0",
     "PyJWT[crypto]>=2.10.0",
     "httpx>=0.28.0",
-    "alembic>=1.18.4",
     "python-multipart>=0.0.22",
 ]
 
@@ -24,7 +22,7 @@ dev = [
     "ruff>=0.15.0",
     "mypy>=1.19.1",
     "types-PyYAML>=6.0.12.20250915",
-    "types-psycopg2>=2.9.21.20251012",
+    "types-psycopg2>=2.9.21.20251012",  # Keeping for compatibility if needed, but should be removed eventually
 
 ]
 

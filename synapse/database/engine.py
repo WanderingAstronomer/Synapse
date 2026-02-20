@@ -76,18 +76,17 @@ def create_db_engine() -> Engine:
     url = os.getenv("DATABASE_URL")
     if not url:
         raise RuntimeError(
-            "DATABASE_URL is not set.  "
-            "Copy .env.example → .env and set a valid PostgreSQL URL."
+            "DATABASE_URL is not set.  Copy .env.example → .env and set a valid PostgreSQL URL."
         )
 
     engine = create_engine(
         url,
-        echo=False,        # Set True for SQL debugging
+        echo=False,  # Set True for SQL debugging
         pool_size=5,
         max_overflow=10,
-        pool_pre_ping=True,   # Reconnect stale connections automatically
-        pool_timeout=10,      # Fail after 10s instead of hanging forever
-        pool_recycle=3600,    # Recycle connections after 1 hour
+        pool_pre_ping=True,  # Reconnect stale connections automatically
+        pool_timeout=10,  # Fail after 10s instead of hanging forever
+        pool_recycle=3600,  # Recycle connections after 1 hour
     )
     logger.info("Database engine created → %s", engine.url.host)
     return engine

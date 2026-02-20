@@ -48,9 +48,15 @@ class SynapseConfig:
 
     # Admin / Hardened Access
     admin_role_id: int  # Discord role required for admin commands/dashboard
+    admin_rate_limit: int = 30  # Mutations per window
+    admin_rate_window: int = 60  # Rate limit window in seconds
+
+    # Gameplay (System-wide defaults)
+    voice_ticks_per_hour: int = 6  # Max voice XP ticks per hour
 
     # Optional
     announce_channel_id: int | None = None  # Where to post level-ups / achievements
+    dashboard_url: str | None = None  # Public URL of the dashboard (e.g. https://synapse.yourdomain.com)
 
 
 # ---------------------------------------------------------------------------
@@ -83,6 +89,9 @@ def load_config(path: str | Path = "config.yaml") -> SynapseConfig:
         raw: dict = yaml.safe_load(fh)
 
     return SynapseConfig(
+        admin_rate_limit=int(raw.get("admin_rate_limit", 30)),
+        admin_rate_window=int(raw.get("admin_rate_window", 60)),
+        voice_ticks_per_hour=int(raw.get("voice_ticks_per_hour", 6)),
         community_name=raw["community_name"],
         community_motto=raw["community_motto"],
         bot_prefix=raw["bot_prefix"],
@@ -91,4 +100,5 @@ def load_config(path: str | Path = "config.yaml") -> SynapseConfig:
         announce_channel_id=(
             int(raw["announce_channel_id"]) if raw.get("announce_channel_id") else None
         ),
+        dashboard_url=raw.get("dashboard_url") or None,
     )

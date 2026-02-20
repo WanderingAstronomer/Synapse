@@ -39,25 +39,18 @@ def reconcile_counters(engine: Engine) -> dict:
 
     with get_session(engine) as session:
         # Ground truth: COUNT(*) per (user_id, event_type) from raw events
-        truth_q = (
-            select(
-                EventLake.user_id,
-                EventLake.event_type,
-                func.count().label("actual"),
-            )
-            .group_by(EventLake.user_id, EventLake.event_type)
-        )
+        truth_q = select(
+            EventLake.user_id,
+            EventLake.event_type,
+            func.count().label("actual"),
+        ).group_by(EventLake.user_id, EventLake.event_type)
         truth_rows = session.execute(truth_q).all()
         truth_map: dict[tuple[int, str], int] = {
-            (row.user_id, row.event_type): row.actual
-            for row in truth_rows
+            (row.user_id, row.event_type): row.actual for row in truth_rows
         }
 
         # Current counters for period='lifetime'
-        counter_q = (
-            select(EventCounter)
-            .where(EventCounter.period == "lifetime")
-        )
+        counter_q = select(EventCounter).where(EventCounter.period == "lifetime")
         counter_rows = session.scalars(counter_q).all()
         counter_map: dict[tuple[int, str], EventCounter] = {
             (c.user_id, c.event_type): c for c in counter_rows
@@ -73,13 +66,15 @@ def reconcile_counters(engine: Engine) -> dict:
 
             if stored != actual:
                 diff = actual - stored
-                corrections.append({
-                    "user_id": user_id,
-                    "event_type": event_type,
-                    "stored": stored,
-                    "actual": actual,
-                    "diff": diff,
-                })
+                corrections.append(
+                    {
+                        "user_id": user_id,
+                        "event_type": event_type,
+                        "stored": stored,
+                        "actual": actual,
+                        "diff": diff,
+                    }
+                )
 
                 # Upsert correct value
                 session.execute(
@@ -97,13 +92,15 @@ def reconcile_counters(engine: Engine) -> dict:
         for (user_id, event_type), counter in counter_map.items():
             if (user_id, event_type) not in truth_map and counter.count != 0:
                 checked += 1
-                corrections.append({
-                    "user_id": user_id,
-                    "event_type": event_type,
-                    "stored": counter.count,
-                    "actual": 0,
-                    "diff": -counter.count,
-                })
+                corrections.append(
+                    {
+                        "user_id": user_id,
+                        "event_type": event_type,
+                        "stored": counter.count,
+                        "actual": 0,
+                        "diff": -counter.count,
+                    }
+                )
                 session.execute(
                     text("""
                         UPDATE event_counters
@@ -118,7 +115,9 @@ def reconcile_counters(engine: Engine) -> dict:
     if corrections:
         logger.warning(
             "Counter reconciliation: corrected %d/%d counters: %s",
-            len(corrections), checked, corrections,
+            len(corrections),
+            checked,
+            corrections,
         )
     else:
         logger.info("Counter reconciliation: all %d counters match", checked)

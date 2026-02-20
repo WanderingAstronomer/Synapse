@@ -5,7 +5,7 @@
 </script>
 
 {#if flash.messages.length > 0}
-	<div class="fixed top-4 right-4 z-50 space-y-2 max-w-sm">
+	<div class="fixed bottom-4 right-4 z-50 space-y-2 max-w-sm">
 		{#each flash.messages as msg (msg.id)}
 			<div
 				class="flex items-start gap-3 px-4 py-3 rounded-lg border {FLASH_CONFIG[msg.type]?.styles || ''} shadow-xl backdrop-blur"

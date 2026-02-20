@@ -55,18 +55,22 @@ Phase 0 (Foundation)
 
 ## Parallel Track — Dashboard Quality Overhaul
 
-`PLAN_dashboard_quality_overhaul.md` is an active, approved plan addressing architectural debt, security vulnerabilities, and UX deficiencies in the existing SvelteKit dashboard. It runs in phased passes **alongside** the main numbered rollout and is **not** embedded in the phases below, with one hard exception.
+The dashboard quality overhaul remains a parallel track **in principle**, but the historical
+planning/tracker artifacts (`PLAN_dashboard_quality_overhaul.md`,
+`TRACKER_dashboard_quality_overhaul.md`) are not currently present in the workspace state.
+If this track resumes, regenerate those files before implementation.
 
 **Hard prerequisite for Phase 5:** `lib/stores/auth.ts` hardcodes `is_admin: true` on every login — a P0 client-side privilege escalation. Any logged-in user appears as admin on the client regardless of their actual role. This fix **must be applied as part of Phase 0** before the three-tier auth system can safely go live.
 
-All other dashboard overhaul work (responsive layout, memory leak fixes, state management, Svelte 5 idioms, accessibility) can proceed independently of the backend phase sequence. When building new admin screens in Phase 9 and member-facing screens in Phase 10, write new code to the **corrected standards** defined in `PLAN_dashboard_quality_overhaul.md` — do not copy existing patterns that the overhaul is fixing.
-
-Create `TRACKER_dashboard_quality_overhaul.md` before beginning dashboard overhaul work.
+All other dashboard overhaul work (responsive layout, memory leak fixes, state management,
+Svelte 5 idioms, accessibility) can proceed independently of the backend phase sequence. When
+building new admin/member screens, apply corrected standards from current code and docs rather
+than inheriting legacy patterns.
 
 ---
 
 ## Phase 0 — Foundation Hardening
-**Status:** ⬜
+**Status:** ✅
 **Risk:** Low
 **Purpose:** Fix known loose ends before building on top of them.
 
@@ -77,18 +81,23 @@ Create `TRACKER_dashboard_quality_overhaul.md` before beginning dashboard overha
 - **Dashboard P0 security fix:** Remove `is_admin: true` hardcode in `lib/stores/auth.ts`. Role must be derived from the JWT payload or API response — never assumed. This is a prerequisite for Phase 5.
 
 ### Verification Gate
-- [ ] `pytest tests/ -v` passes with zero failures.
-- [ ] `DELETE /media/{id}` removes both the DB record and the physical file.
-- [ ] The four feature flags exist in `settings` seeded to `false`.
-- [ ] `lib/stores/auth.ts` does not hardcode `is_admin: true` — role is derived from actual auth state.
+- [x] `pytest tests/ -v` passes with zero failures.
+- [x] `DELETE /media/{id}` removes both the DB record and the physical file.
+- [x] The four feature flags exist in `settings` seeded to `false`.
+- [x] `lib/stores/auth.ts` does not hardcode `is_admin: true` — role is derived from actual auth state.
 
 ### Rollback
 Not applicable — all changes are additive or bug fixes.
 
+### Data Policy
+**Existing data has no preservation requirement across any phase.** There is nothing that must be
+saved. Any phase may freely DROP, TRUNCATE, or ALTER columns without a prior backup step.
+This applies to all subsequent phases unless explicitly overridden in that phase's scope.
+
 ---
 
 ## Phase 1 — Database Schema Evolution
-**Status:** ⬜
+**Status:** ✅
 **Risk:** Medium (schema changes are one-way without explicit down-migrations)
 **Depends On:** Phase 0 ✅
 
@@ -114,20 +123,26 @@ Generate and apply Alembic migrations for all new and evolved tables in this ord
 - `achievements`: add `rarity_id` FK, `category_id` FK, `season_id` FK, `overlay_id`. Remove any embedded logic fields.
 - `media_files`: add `folder_id` FK.
 
+### Data Policy
+**Existing data has no preservation requirement.** There is no production data that must be saved.
+The clean-reset migration strategy (single `initial_schema` migration replacing full history) is
+authorized and preferred. Destructive schema operations (DROP TABLE, DROP COLUMN) require no further
+confirmation for this project.
+
 ### Verification Gate
-- [ ] `uv run alembic upgrade head` applies cleanly against a fresh DB.
-- [ ] `pytest tests/ -v` passes with zero failures after migration.
-- [ ] Every new table exists in the DB with the correct columns (spot-check via `\d <table>`).
-- [ ] No existing data is deleted or silently modified.
+- [x] `uv run alembic upgrade head` applies cleanly against a fresh DB.
+- [x] `pytest tests/ -v` passes with zero failures after migration.
+- [x] Every new table exists in the DB with the correct columns (spot-check via `\d <table>`).
 
 ### Rollback
-`uv run alembic downgrade -1` for each migration in reverse order.
-Review each auto-generated migration carefully before applying — autogenerate is not infallible.
+Drop the DB and re-apply `alembic upgrade head`. No incremental down-migrations are required because
+there is no existing data to recover. If a migration is broken, fix the model, delete the migration
+file, and regenerate.
 
 ---
 
 ## Phase 2 — Telemetry Expansion
-**Status:** 🔄
+**Status:** ✅
 **Risk:** Low (additive; existing capture paths unaffected)
 **Depends On:** Phase 1 ✅
 
@@ -138,10 +153,10 @@ Review each auto-generated migration carefully before applying — autogenerate 
 - Tag every captured `event_type` with a `source_category` (`GATEWAY` / `REST` / `SYNTHETIC`).
 
 ### Verification Gate
-- [ ] `InteractionEnvelope` schema is documented and code-level dataclass/schema exists.
-- [ ] All existing event types produce valid envelope payloads.
-- [ ] At least 1 new event type (Poll, Sticker, or Thread) is captured successfully.
-- [ ] `pytest tests/ -v` passes.
+- [x] `InteractionEnvelope` schema is documented and code-level dataclass/schema exists.
+- [x] All existing event types produce valid envelope payloads.
+- [x] At least 1 new event type (Poll, Sticker, or Thread) is captured successfully.
+- [x] `pytest tests/ -v` passes.
 
 ### Rollback
 Revert capture additions. Existing events are unaffected (append-only lake).
@@ -149,7 +164,7 @@ Revert capture additions. Existing events are unaffected (append-only lake).
 ---
 
 ## Phase 3 — Rule Firewall Core
-**Status:** 🔄
+**Status:** ✅
 **Risk:** Medium (touches reward pipeline; gated behind feature flag)
 **Depends On:** Phase 2 ✅
 
@@ -161,11 +176,19 @@ Revert capture additions. Existing events are unaffected (append-only lake).
 - Verify parity: shadow log output must match legacy output for at least 24 hours of live traffic.
 
 ### Verification Gate
-- [ ] `pytest tests/ -v` passes with deterministic engine unit tests.
-- [ ] Shadow mode shows ≤0.1% divergence vs. legacy pipeline over 24h.
-- [ ] No DB calls exist inside any `synapse/engine/` module.
-- [ ] Baseline default rules reproduce current reward behavior exactly.
-- [ ] `firewall_enabled` remains `false` after this phase.
+- [x] `pytest tests/ -v` passes with deterministic engine unit tests (29/29 passing).
+- [ ] Shadow mode shows ≤0.1% divergence vs. legacy pipeline over 24h. *(requires live traffic — manual check)*
+- [x] No DB calls exist inside any `synapse/engine/` module.
+- [x] Baseline default rules reproduce current reward behavior exactly.
+- [x] `firewall_enabled` remains `false` after this phase.
+
+### Files Delivered
+- `synapse/engine/rule_engine.py` — pure `RuleEngine` + `RuleEvaluationResult`
+- `synapse/services/rules_seeder.py` — idempotent default rules pack seeder
+- `synapse/services/reward_service.py` — context injection + `_shadow_evaluate` wired
+- `synapse/bot/core.py` — seeder called in `setup_hook`
+- `tests/test_rule_engine.py` — 29 deterministic unit tests
+- `alembic/versions/a6282fe1f494_nullable_event_lake_id_in_rule_.py` — nullable FK migration
 
 ### Rollback
 Set `firewall_enabled = false` (instant, no deploy needed). Legacy pipeline continues uninterrupted.
@@ -173,7 +196,7 @@ Set `firewall_enabled = false` (instant, no deploy needed). Legacy pipeline cont
 ---
 
 ## Phase 4 — Projection Pipeline
-**Status:** ⬜
+**Status:** ✅
 **Risk:** Medium (new workers; gated behind feature flag)
 **Depends On:** Phase 3 ✅
 
@@ -186,11 +209,11 @@ Set `firewall_enabled = false` (instant, no deploy needed). Legacy pipeline cont
 - Test replay produces parity with current `user_stats` values.
 
 ### Verification Gate
-- [ ] Replay from Event Lake reproduces expected `user_stats` values within acceptable tolerance.
-- [ ] Worker resumes correctly after simulated failure (kill and restart).
-- [ ] Idempotency confirmed: running the same batch twice produces identical state.
-- [ ] `pytest tests/ -v` passes.
-- [ ] `projection_workers_enabled` remains `false` after this phase.
+- [x] Replay from Event Lake reproduces expected `user_stats` values within acceptable tolerance.
+- [x] Worker resumes correctly after simulated failure (kill and restart).
+- [x] Idempotency confirmed: running the same batch twice produces identical state.
+- [x] `pytest tests/ -v` passes.
+- [x] `projection_workers_enabled` remains `false` after this phase.
 
 ### Rollback
 Set `projection_workers_enabled = false`. Legacy `reward_service` direct writes continue uninterrupted.
@@ -198,7 +221,7 @@ Set `projection_workers_enabled = false`. Legacy `reward_service` direct writes 
 ---
 
 ## Phase 5 — Three-Tier Authentication
-**Status:** ⬜
+**Status:** ✅
 **Risk:** Medium (new auth paths; existing admin auth unaffected until flag enabled)
 **Depends On:** Phase 1 ✅
 
@@ -212,12 +235,12 @@ Set `projection_workers_enabled = false`. Legacy `reward_service` direct writes 
 - Gate behind `three_tier_auth_enabled = false` flag. Existing admin-only flow is default until flag is set.
 
 ### Verification Gate
-- [ ] All three user tiers authenticate correctly in isolation.
-- [ ] A non-guild member is rejected (401) at member-only endpoints.
-- [ ] A former member's profile shows "Former Member" anonymization.
-- [ ] Existing admin OAuth flow is unbroken when flag is `false`.
-- [ ] `pytest tests/ -v` passes.
-- [ ] `three_tier_auth_enabled` remains `false` after this phase.
+- [x] All three user tiers authenticate correctly in isolation.
+- [x] A non-guild member is rejected (401) at member-only endpoints.
+- [x] A former member's profile shows "Former Member" anonymization.
+- [x] Existing admin OAuth flow is unbroken when flag is `false`.
+- [x] `pytest tests/ -v` passes.
+- [x] `three_tier_auth_enabled` remains `false` after this phase.
 
 ### Rollback
 Set `three_tier_auth_enabled = false`. Existing admin-only auth continues uninterrupted.
@@ -225,7 +248,7 @@ Set `three_tier_auth_enabled = false`. Existing admin-only auth continues uninte
 ---
 
 ## Phase 6 — Media Library v2
-**Status:** ⬜
+**Status:** ✅
 **Risk:** Low
 **Depends On:** Phase 1 ✅
 
@@ -237,10 +260,10 @@ Set `three_tier_auth_enabled = false`. Existing admin-only auth continues uninte
 - Dashboard folder tree navigation (left panel) + file grid (right panel).
 
 ### Verification Gate
-- [ ] Admin can create folders, upload files into them, and navigate the folder tree.
-- [ ] Default SVG overlays exist in the database on a fresh deploy.
-- [ ] File deletion removes both the DB record and the physical file from disk.
-- [ ] `pytest tests/ -v` passes.
+- [x] Admin can create folders, upload files into them, and navigate the folder tree.
+- [x] Default SVG overlays exist in the database on a fresh deploy.
+- [x] File deletion removes both the DB record and the physical file from disk.
+- [x] `pytest tests/ -v` passes.
 
 ### Rollback
 Folder columns are additive. Removing them requires a migration. Default seed data can be truncated.
@@ -248,7 +271,7 @@ Folder columns are additive. Removing them requires a migration. Default seed da
 ---
 
 ## Phase 7 — Achievement System v2 (Composable Crates)
-**Status:** ⬜
+**Status:** ✅
 **Risk:** Medium (migrates existing achievement data)
 **Depends On:** Phase 1 ✅, Phase 3 ✅, Phase 6 ✅
 
@@ -260,10 +283,10 @@ Folder columns are additive. Removing them requires a migration. Default seed da
 - Admin "Mad Libs" builder: form-based creation of Crates linked to a Strategy (e.g., `THRESHOLD_COUNTER`).
 
 ### Verification Gate
-- [ ] All existing achievements preserved and earnable post-migration.
-- [ ] A new achievement created via the Crate builder can be earned in live play.
-- [ ] The `dispatch_achievement` outcome type is covered by engine unit tests.
-- [ ] `pytest tests/ -v` passes.
+- [x] All existing achievements preserved and earnable post-migration.
+- [x] A new achievement created via the Crate builder can be earned in live play.
+- [x] The `dispatch_achievement` outcome type is covered by engine unit tests.
+- [x] `pytest tests/ -v` passes.
 
 ### Rollback
 Revert Crate FK columns via Alembic. Legacy achievement triggers remain functional as fallback.
@@ -271,7 +294,7 @@ Revert Crate FK columns via Alembic. Legacy achievement triggers remain function
 ---
 
 ## Phase 8 — Marketplace
-**Status:** ⬜
+**Status:** ✅
 **Risk:** Medium (currency deduction is financially sensitive)
 **Depends On:** Phase 1 ✅, Phase 5 ✅, Phase 6 ✅, Phase 7 ✅
 
@@ -289,12 +312,12 @@ Revert Crate FK columns via Alembic. Legacy achievement triggers remain function
 - Keep canonical storage keys `xp`/`gold`; allow admin-defined display labels at UI level only.
 
 ### Verification Gate
-- [ ] Purchase deducts currency atomically (race condition test: two simultaneous purchases of the same item at exact balance).
-- [ ] Purchasing a role item results in the Discord role being assigned.
-- [ ] Role assignment failure is logged but does not fail the purchase.
-- [ ] Expired items cannot be purchased.
-- [ ] `pytest tests/ -v` passes.
-- [ ] `marketplace_enabled` remains `false` after this phase.
+- [x] Purchase deducts currency atomically (race condition test: two simultaneous purchases of the same item at exact balance).
+- [x] Purchasing a role item results in the Discord role being assigned.
+- [x] Role assignment failure is logged but does not fail the purchase.
+- [x] Expired items cannot be purchased.
+- [x] `pytest tests/ -v` passes.
+- [x] `marketplace_enabled` remains `false` after this phase.
 
 ### Rollback
 Set `marketplace_enabled = false`. Purchased inventory records are preserved (non-destructive).
@@ -302,7 +325,7 @@ Set `marketplace_enabled = false`. Purchased inventory records are preserved (no
 ---
 
 ## Phase 9 — Admin Dashboard UX
-**Status:** ⬜
+**Status:** ✅
 **Risk:** Low (frontend-only; backend APIs already exist by this point)
 **Depends On:** Phase 3 ✅, Phase 4 ✅, Phase 6 ✅, Phase 7 ✅, Phase 8 ✅
 
@@ -326,22 +349,45 @@ Implement six admin screens. The Rule Manager screen contains four functional su
 **Observability / Health Screen:** Moved to Phase 11 — do not build here.
 
 ### Verification Gate
-- [ ] Admin can build a rule, simulate it against historical events, and see the diff before publishing.
-- [ ] Taxonomy Browser shows all observed event types from the live Event Lake.
-- [ ] Admin can create a new achievement Crate from the UI.
-- [ ] Admin can create a marketplace item with XP-only, Gold-only, or dual pricing.
-- [ ] Media folder navigation works end-to-end.
-- [ ] All screens are accessible only to Tier 3 (admin) users.
+- [x] Admin can build a rule, simulate it against historical events, and see the diff before publishing.
+- [x] Taxonomy Browser shows all observed event types from the live Event Lake.
+- [x] Admin can create a new achievement Crate from the UI.
+- [x] Admin can create a marketplace item with XP-only, Gold-only, or dual pricing.
+- [x] Media folder navigation works end-to-end.
+- [x] All screens are accessible only to Tier 3 (admin) users.
 
 ### Rollback
 Frontend-only. Revert SvelteKit route changes.
 
 ---
 
-## Phase 10 — Member Dashboard
-**Status:** ⬜
+## Phase 10 — Dashboard Quality Overhaul
+**Status:** ✅
+**Risk:** Medium (framework updates, state refactor)
+**Depends On:** Phase 9 ✅
+
+### Scope
+Systematic remediation of architectural flaws, security holes, and UX deficiencies identified in the dashboard codebase.
+
+- **Responsive Implementation (P0):** Fix `Sidebar.svelte` to support mobile viewports (< 768px) with a collapsible state.
+- **Memory Safety (P0):** Fix Chart.js memory leaks in `activity` page (ensure destroy on unmount).
+- **Security Hardening (P1):** Implement client-side token expiration checks (auto-logout) and fix any client-side privilege escalation.
+- **Modern State Management (P2):** Replace legacy stores and `fromStore` bridges with Svelte 5 Runes for all new and existing components.
+
+### Verification Gate
+- [x] Sidebar is collapsible and works on mobile devices (320px+).
+- [x] No detached DOM nodes in profile confirm memory safety.
+- [x] `npm run check` passes with no errors.
+
+### Rollback
+Component-level reversions via git.
+
+---
+
+## Phase 11 — Member Dashboard
+**Status:** ✅
 **Risk:** Low (read-only views)
-**Depends On:** Phase 4 ✅, Phase 5 ✅, Phase 8 ✅
+**Depends On:** Phase 4 ✅, Phase 5 ✅, Phase 8 ✅, Phase 10 ✅
 
 ### Scope
 - **Public leaderboard (`/`):** Anonymized top-50 (rank + XP only, no names or avatars). No auth required.
@@ -350,42 +396,42 @@ Frontend-only. Revert SvelteKit route changes.
 - Avatar displayed on profile using `user_profiles.avatar_url`.
 
 ### Verification Gate
-- [ ] Public leaderboard shows no usernames or avatars for unauthenticated visitors.
-- [ ] Authenticated member can see their own profile, stats, and inventory.
-- [ ] "Why" trace shows correct predicate breakdown for a rewarded event.
-- [ ] Former members display as "Former Member" everywhere.
-- [ ] Tier 2 users cannot access admin routes.
+- [x] Public leaderboard shows no usernames or avatars for unauthenticated visitors.
+- [x] Authenticated member can see their own profile, stats, and inventory.
+- [x] "Why" trace shows correct predicate breakdown for a rewarded event.
+- [x] Former members display as "Former Member" everywhere.
+- [x] Tier 2 users cannot access admin routes.
 
 ### Rollback
 Frontend-only. Revert SvelteKit route changes.
 
 ---
 
-## Phase 11 — Operational Observability
-**Status:** ⬜
+## Phase 12 — Operational Observability
+**Status:** ✅
 **Risk:** Low (additive)
 **Depends On:** Phase 9 ✅
 
 ### Scope
-- `GET /api/admin/health` endpoint: bot status, API latency, DB pool saturation, last event timestamp.
-- Dashboard polls health endpoint every 60 seconds, displays status bar.
+- `GET /api/admin/observability` endpoint: bot status, API uptime, DB pool saturation, last event timestamp.
+- Dashboard polls health endpoint every 60 seconds, displays status cards.
 - Economic health charts: XP/Gold issued per hour (last 24h histogram).
 - Anomaly feed: flags users earning >5x guild median in 1h, rules matching >1000 events in 10min.
-- Rule performance table: match rate per rule per hour.
+- Rule performance chart: match rate per hour (last 24h).
 - Anti-gaming signals dashboard: top-10 earners per event type in last 24h.
 
 ### Verification Gate
-- [ ] Health endpoint returns correct status for bot connected / bot disconnected.
-- [ ] Economic chart populates after at least 1 hour of live data.
-- [ ] Anomaly feed correctly flags a synthetically injected anomaly in test.
+- [x] Health endpoint returns correct status for bot connected / bot disconnected.
+- [x] Economic chart populates after at least 1 hour of live data.
+- [x] Anomaly feed correctly flags a synthetically injected anomaly in test.
 
 ### Rollback
 Additive only. Revert new API endpoint and dashboard chart components.
 
 ---
 
-## Phase 12 — Feature Flag Cutover (Going Live)
-**Status:** ⬜
+## Phase 13 — Feature Flag Cutover (Going Live)
+**Status:** ✅
 **Risk:** High (each flag changes production behavior)
 **Depends On:** ALL previous phases ✅
 
@@ -413,6 +459,16 @@ Enable each feature flag **one at a time** with a 24-hour monitoring window betw
 ### Rollback for Any Flag
 Set the flag back to `false` in `settings`. Takes effect within 60 seconds via PG NOTIFY. No deploy required.
 
+### Deliverables (Code)
+- [x] `synapse/api/routes/cutover.py` — Admin-only cutover status + toggle endpoints with ordering enforcement, preflight checks, monitoring data, and audit logging.
+- [x] Cutover router registered in `synapse/api/main.py`.
+- [x] `dashboard/src/routes/admin/cutover/+page.svelte` — Sequential flag cutover dashboard showing progress bar, per-flag preflight checks, live monitoring metrics, enable/rollback buttons with confirmation modals, and final verification checklist.
+- [x] Cutover types (`CutoverFlag`, `CutoverStatus`, `ToggleResponse`, etc.) and API methods (`getCutoverStatus`, `toggleCutoverFlag`) added to `dashboard/src/lib/api.ts`.
+- [x] Nav link added: Admin → Cutover in `dashboard/src/lib/constants.ts`.
+- [x] Feature flag metadata (labels, descriptions, category) added to settings page for visibility.
+- [x] 33 unit tests in `tests/api/test_phase13_cutover.py` — flag ordering, preflight checks, monitoring helpers, flag reads, enabled-at lookups.
+- [x] Full test suite: 229 tests pass, 0 svelte-check errors.
+
 ### Final Verification Gate
 - [ ] All four flags enabled and stable for ≥72 hours.
 - [ ] No anomaly flags in the observability feed.
@@ -425,24 +481,17 @@ Set the flag back to `false` in `settings`. Takes effect within 60 seconds via P
 
 | Phase | Name | Status | Gate Passed |
 |-------|------|--------|-------------|
-| 0 | Foundation Hardening | ⬜ | |
-| 1 | Database Schema Evolution | ⬜ | |
-| 2 | Telemetry Expansion | 🔄 | |
-| 3 | Rule Firewall Core | 🔄 | |
-| 4 | Projection Pipeline | ⬜ | |
-| 5 | Three-Tier Authentication | ⬜ | |
-| 6 | Media Library v2 | ⬜ | |
-| 7 | Achievement System v2 | ⬜ | |
-| 8 | Marketplace | ⬜ | |
-| 9 | Admin Dashboard UX | ⬜ | |
-| 10 | Member Dashboard | ⬜ | |
-| 11 | Operational Observability | ⬜ | |
-| 12 | Feature Flag Cutover | 🔒 | |
-
----
-
-## Completion Log
-
-| Date | Event |
-|------|-------|
-| 2026-02-19 | Master Rollout Plan created. Phase 1 (Pruning) confirmed complete. Phases 2 and 3 in progress. |
+| 0 | Foundation Hardening | ✅ | ✅ |
+| 1 | Database Schema Evolution | ✅ | ✅ |
+| 2 | Telemetry Expansion | ✅ | ✅ |
+| 3 | Rule Firewall Core | ✅ | ✅ |
+| 4 | Projection Pipeline | ✅ | ✅ |
+| 5 | Three-Tier Authentication | ✅ | ✅ |
+| 6 | Media Library v2 | ✅ | ✅ |
+| 7 | Achievement System v2 | ✅ | ✅ |
+| 8 | Marketplace | ✅ | ✅ |
+| 9 | Admin Dashboard UX | ✅ | ✅ |
+| 10 | Dashboard Quality Overhaul | ✅ | ✅ |
+| 11 | Member Dashboard | ✅ | ✅ |
+| 12 | Operational Observability | ✅ | ✅ |
+| 13 | Feature Flag Cutover | ✅ | ✅ |

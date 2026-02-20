@@ -12,39 +12,33 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
+from enum import StrEnum
 
 from synapse.database.models import InteractionType
 
-__all__ = ["SynapseEvent", "BASE_XP", "BASE_STARS"]
+__all__ = ["SynapseEvent", "EventType"]
+
 
 # ---------------------------------------------------------------------------
-# Base XP and Stars per interaction type (05 §5.2)
+# Event Lake event type constants (match 03B_DATA_LAKE.md §3B.4)
 # ---------------------------------------------------------------------------
-BASE_XP: dict[InteractionType, int] = {
-    InteractionType.MESSAGE: 15,
-    InteractionType.REACTION_GIVEN: 2,
-    InteractionType.REACTION_RECEIVED: 3,
-    InteractionType.THREAD_CREATE: 20,
-    InteractionType.VOICE_TICK: 0,
-    InteractionType.MANUAL_AWARD: 0,  # varies
-    InteractionType.LEVEL_UP: 0,
-    InteractionType.ACHIEVEMENT_EARNED: 0,
-    InteractionType.VOICE_JOIN: 0,
-    InteractionType.VOICE_LEAVE: 0,
-}
+class EventType(StrEnum):
+    """Canonical event type identifiers for the Event Lake.
 
-BASE_STARS: dict[InteractionType, int] = {
-    InteractionType.MESSAGE: 1,
-    InteractionType.REACTION_GIVEN: 1,
-    InteractionType.REACTION_RECEIVED: 1,
-    InteractionType.THREAD_CREATE: 2,
-    InteractionType.VOICE_TICK: 1,
-    InteractionType.MANUAL_AWARD: 0,
-    InteractionType.LEVEL_UP: 0,
-    InteractionType.ACHIEVEMENT_EARNED: 0,
-    InteractionType.VOICE_JOIN: 0,
-    InteractionType.VOICE_LEAVE: 0,
-}
+    All event writes and counter lookups should reference these constants
+    rather than bare strings to ensure rename-safety.
+    """
+
+    MESSAGE_CREATE = "message_create"
+    REACTION_ADD = "reaction_add"
+    REACTION_REMOVE = "reaction_remove"
+    THREAD_CREATE = "thread_create"
+    VOICE_JOIN = "voice_join"
+    VOICE_LEAVE = "voice_leave"
+    VOICE_MOVE = "voice_move"
+    MEMBER_JOIN = "member_join"
+    MEMBER_LEAVE = "member_leave"
+    POLL_VOTE = "poll_vote"
 
 
 # ---------------------------------------------------------------------------

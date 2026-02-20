@@ -48,15 +48,45 @@ def calculate_quality_modifier(
     length = m.get("length", 0)
 
     # Read thresholds from settings (fall back to module-level defaults)
-    long_threshold = cache.get_int("quality_long_message_chars", _LONG_MSG_CHARS) if cache else _LONG_MSG_CHARS
-    long_bonus = cache.get_float("quality_long_message_bonus", _LONG_MSG_BONUS) if cache else _LONG_MSG_BONUS
-    medium_threshold = cache.get_int("quality_medium_message_chars", _MEDIUM_MSG_CHARS) if cache else _MEDIUM_MSG_CHARS
-    medium_bonus = cache.get_float("quality_medium_message_bonus", _MEDIUM_MSG_BONUS) if cache else _MEDIUM_MSG_BONUS
-    code_bonus = cache.get_float("quality_code_block_bonus", _CODE_BLOCK_BONUS) if cache else _CODE_BLOCK_BONUS
+    long_threshold = (
+        cache.get_int("quality_long_message_chars", _LONG_MSG_CHARS) if cache else _LONG_MSG_CHARS
+    )
+    long_bonus = (
+        cache.get_float("quality_long_message_bonus", _LONG_MSG_BONUS)
+        if cache
+        else _LONG_MSG_BONUS
+    )
+    medium_threshold = (
+        cache.get_int("quality_medium_message_chars", _MEDIUM_MSG_CHARS)
+        if cache
+        else _MEDIUM_MSG_CHARS
+    )
+    medium_bonus = (
+        cache.get_float("quality_medium_message_bonus", _MEDIUM_MSG_BONUS)
+        if cache
+        else _MEDIUM_MSG_BONUS
+    )
+    code_bonus = (
+        cache.get_float("quality_code_block_bonus", _CODE_BLOCK_BONUS)
+        if cache
+        else _CODE_BLOCK_BONUS
+    )
     link_bonus = cache.get_float("quality_link_bonus", _LINK_BONUS) if cache else _LINK_BONUS
-    attachment_bonus = cache.get_float("quality_attachment_bonus", _ATTACHMENT_BONUS) if cache else _ATTACHMENT_BONUS
-    emoji_threshold = cache.get_int("quality_emoji_spam_threshold", _EMOJI_SPAM_THRESHOLD) if cache else _EMOJI_SPAM_THRESHOLD
-    emoji_penalty = cache.get_float("quality_emoji_spam_penalty", _EMOJI_SPAM_PENALTY) if cache else _EMOJI_SPAM_PENALTY
+    attachment_bonus = (
+        cache.get_float("quality_attachment_bonus", _ATTACHMENT_BONUS)
+        if cache
+        else _ATTACHMENT_BONUS
+    )
+    emoji_threshold = (
+        cache.get_int("quality_emoji_spam_threshold", _EMOJI_SPAM_THRESHOLD)
+        if cache
+        else _EMOJI_SPAM_THRESHOLD
+    )
+    emoji_penalty = (
+        cache.get_float("quality_emoji_spam_penalty", _EMOJI_SPAM_PENALTY)
+        if cache
+        else _EMOJI_SPAM_PENALTY
+    )
 
     # Length bonus (mutually exclusive tiers)
     if length > long_threshold:

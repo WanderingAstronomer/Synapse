@@ -19,14 +19,22 @@ def build_level_up_embed(
     avatar_url: str,
     new_level: int,
     gold_bonus: int,
+    message_template: str | None = None,
 ) -> discord.Embed:
     """Build a level-up celebration embed with @mention."""
+    if message_template:
+        # Simple templating
+        description = message_template.replace("{user}", f"<@{user_id}>") \
+            .replace("{level}", str(new_level)) \
+            .replace("{gold}", str(gold_bonus))
+    else:
+        description = (
+            f"<@{user_id}> reached **Level {new_level}**!\n+{gold_bonus} \U0001fa99 Gold awarded."
+        )
+
     embed = discord.Embed(
         title="\u26a1 Level Up!",
-        description=(
-            f"<@{user_id}> reached **Level {new_level}**!\n"
-            f"+{gold_bonus} \U0001fa99 Gold awarded."
-        ),
+        description=description,
         color=discord.Color.gold(),
     )
     embed.set_thumbnail(url=avatar_url)
@@ -43,7 +51,7 @@ def build_achievement_embed(
     # Resolve rarity display from related AchievementRarity row
     rarity_obj = tmpl.rarity
     rarity_name = rarity_obj.name if rarity_obj else "achievement"
-    emoji = (rarity_obj.emoji if rarity_obj and rarity_obj.emoji else "\u26aa")
+    emoji = rarity_obj.emoji if rarity_obj and rarity_obj.emoji else "\u26aa"
     color_hex = rarity_obj.color if rarity_obj else "#9b59b6"
     try:
         color = discord.Color(int(color_hex.lstrip("#"), 16))

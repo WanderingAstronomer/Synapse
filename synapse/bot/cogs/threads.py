@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 
 class Threads(commands.Cog, name="Threads"):
-    """Awards XP and Stars for creating new threads."""
+    """Awards XP for creating new threads."""
 
     def __init__(self, bot: SynapseBot) -> None:
         self.bot = bot
@@ -44,7 +44,8 @@ class Threads(commands.Cog, name="Threads"):
             await self._handle_thread_create(thread)
         except Exception:
             logger.exception(
-                "Error processing thread creation %s", thread.id,
+                "Error processing thread creation %s",
+                thread.id,
                 extra={"event_type": "thread_create", "thread_id": thread.id},
             )
 

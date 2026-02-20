@@ -49,21 +49,18 @@ def run_retention_cleanup(
         with get_session(engine) as session:
             # Find IDs of rows to delete (bounded batch)
             ids = session.scalars(
-                select(EventLake.id)
-                .where(EventLake.timestamp < cutoff)
-                .limit(BATCH_SIZE)
+                select(EventLake.id).where(EventLake.timestamp < cutoff).limit(BATCH_SIZE)
             ).all()
 
             if not ids:
                 break
 
-            result = session.execute(
-                delete(EventLake).where(EventLake.id.in_(ids))
-            )
+            result = session.execute(delete(EventLake).where(EventLake.id.in_(ids)))
             events_deleted += result.rowcount  # type: ignore[operator]
             logger.info(
                 "Retention: deleted %d event_lake rows (total so far: %d)",
-                result.rowcount, events_deleted,
+                result.rowcount,
+                events_deleted,
             )
 
     # --- Prune stale day counters ---
@@ -84,7 +81,10 @@ def run_retention_cleanup(
     logger.info(
         "Retention cleanup complete — %d events, %d counters removed "
         "(retention_days=%d, cutoff=%s)",
-        events_deleted, counters_deleted, retention_days, cutoff.isoformat(),
+        events_deleted,
+        counters_deleted,
+        retention_days,
+        cutoff.isoformat(),
     )
     return {"events_deleted": events_deleted, "counters_deleted": counters_deleted}
 
@@ -92,27 +92,17 @@ def run_retention_cleanup(
 def get_retention_stats(engine: Engine) -> dict:
     """Return Event Lake size statistics for the health dashboard."""
     with get_session(engine) as session:
-        total_events = session.scalar(
-            select(func.count()).select_from(EventLake)
-        ) or 0
+        total_events = session.scalar(select(func.count()).select_from(EventLake)) or 0
 
-        oldest_event = session.scalar(
-            select(func.min(EventLake.timestamp))
-        )
+        oldest_event = session.scalar(select(func.min(EventLake.timestamp)))
 
-        newest_event = session.scalar(
-            select(func.max(EventLake.timestamp))
-        )
+        newest_event = session.scalar(select(func.max(EventLake.timestamp)))
 
-        total_counters = session.scalar(
-            select(func.count()).select_from(EventCounter)
-        ) or 0
+        total_counters = session.scalar(select(func.count()).select_from(EventCounter)) or 0
 
         # Approximate table size via pg_total_relation_size
         try:
-            size_bytes = session.scalar(
-                text("SELECT pg_total_relation_size('event_lake')")
-            ) or 0
+            size_bytes = session.scalar(text("SELECT pg_total_relation_size('event_lake')")) or 0
         except Exception:
             size_bytes = 0
 

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -42,14 +43,16 @@ class AdminRateLimiter:
 
     def __init__(
         self,
-        max_requests: int = DEFAULT_RATE_LIMIT,
-        window_seconds: int = DEFAULT_WINDOW_SECONDS,
+        max_requests: int,
+        window_seconds: int,
         *,
         engine: Engine,
+        time_provider: Callable[[], datetime] | None = None,
     ) -> None:
         self.max_requests = max_requests
         self.window_seconds = window_seconds
         self.engine = engine
+        self.time_provider = time_provider or (lambda: datetime.now(UTC))
 
     def _normalize_dt(self, value: datetime) -> datetime:
         if value.tzinfo is None:
@@ -57,27 +60,26 @@ class AdminRateLimiter:
         return value
 
     def check(self, admin_id: str) -> tuple[bool, dict[str, Any]]:
-        """Check if the admin is within rate limits.
+        """Check if the admin is within rate limits WITHOUT side effects.
+
+        We no longer prune on read. Pruning is handled by a background task.
 
         Returns (allowed, info) where info contains:
           - remaining: requests remaining in the window
           - reset: seconds until the oldest request expires
           - limit: the max requests per window
         """
-        now = datetime.now(UTC)
+        now = self.time_provider()
         cutoff = now - timedelta(seconds=self.window_seconds)
 
         with Session(self.engine) as session:
-            session.execute(
-                delete(AdminRateLimitEvent).where(
-                    AdminRateLimitEvent.admin_id == admin_id,
-                    AdminRateLimitEvent.timestamp < cutoff,
-                )
-            )
-
+            # Only count valid events in the window
             timestamps = session.scalars(
                 select(AdminRateLimitEvent.timestamp)
-                .where(AdminRateLimitEvent.admin_id == admin_id)
+                .where(
+                    AdminRateLimitEvent.admin_id == admin_id,
+                    AdminRateLimitEvent.timestamp >= cutoff,
+                )
                 .order_by(AdminRateLimitEvent.timestamp.asc())
             ).all()
 
@@ -105,30 +107,29 @@ class AdminRateLimiter:
         Returns the same info dict as ``check()`` so callers don't need a
         separate round-trip to get remaining counts.
         """
-        now = datetime.now(UTC)
+        now = self.time_provider()
+        # We calculate cutoff just for the count query, used for the response
         cutoff = now - timedelta(seconds=self.window_seconds)
 
         with Session(self.engine) as session:
-            # Prune expired entries
-            session.execute(
-                delete(AdminRateLimitEvent).where(
-                    AdminRateLimitEvent.admin_id == admin_id,
-                    AdminRateLimitEvent.timestamp < cutoff,
-                )
-            )
             # Record new event
-            session.add(AdminRateLimitEvent(admin_id=admin_id))
-            session.flush()
-
-            # Count current window (including the one just added)
-            count = session.scalar(
-                select(func.count()).select_from(
-                    select(AdminRateLimitEvent.id)
-                    .where(AdminRateLimitEvent.admin_id == admin_id)
-                    .subquery()
-                )
-            ) or 0
+            session.add(AdminRateLimitEvent(admin_id=admin_id, timestamp=now))
             session.commit()
+
+            # Count in current window for the response
+            count = (
+                session.scalar(
+                    select(func.count()).select_from(
+                        select(AdminRateLimitEvent.id)
+                        .where(
+                            AdminRateLimitEvent.admin_id == admin_id,
+                            AdminRateLimitEvent.timestamp >= cutoff,
+                        )
+                        .subquery()
+                    )
+                )
+                or 0
+            )
 
         remaining = max(0, self.max_requests - count)
         return {
@@ -137,6 +138,23 @@ class AdminRateLimiter:
             "limit": self.max_requests,
         }
 
+    def cleanup(self) -> int:
+        """Prune expired events for all admins.
+
+        Intended to be run by a background task (e.g. every minute).
+        Returns the number of deleted rows.
+        """
+        cutoff = self.time_provider() - timedelta(seconds=self.window_seconds)
+        with Session(self.engine) as session:
+            result = session.execute(
+                delete(AdminRateLimitEvent).where(AdminRateLimitEvent.timestamp < cutoff)
+            )
+            count = result.rowcount
+            session.commit()
+            if count > 0:
+                logger.debug("Pruned %d expired rate limit events.", count)
+            return count
+
     def reset(self, admin_id: str | None = None) -> None:
         """Clear rate limit state. If admin_id is None, clear all."""
         with Session(self.engine) as session:
@@ -144,9 +162,7 @@ class AdminRateLimiter:
                 session.execute(delete(AdminRateLimitEvent))
             else:
                 session.execute(
-                    delete(AdminRateLimitEvent).where(
-                        AdminRateLimitEvent.admin_id == admin_id
-                    )
+                    delete(AdminRateLimitEvent).where(AdminRateLimitEvent.admin_id == admin_id)
                 )
             session.commit()
 
@@ -164,12 +180,17 @@ def get_rate_limiter() -> AdminRateLimiter:
     return _limiter
 
 
-def configure_rate_limiter(*, engine: Engine) -> None:
+def configure_rate_limiter(
+    *,
+    engine: Engine,
+    max_requests: int = DEFAULT_RATE_LIMIT,
+    window_seconds: int = DEFAULT_WINDOW_SECONDS,
+) -> None:
     """Configure the global limiter to use durable DB-backed storage."""
     global _limiter
     _limiter = AdminRateLimiter(
-        max_requests=DEFAULT_RATE_LIMIT,
-        window_seconds=DEFAULT_WINDOW_SECONDS,
+        max_requests=max_requests,
+        window_seconds=window_seconds,
         engine=engine,
     )
 
@@ -202,16 +223,15 @@ async def rate_limited_admin(
     if not allowed:
         logger.warning(
             "Rate limit exceeded for admin %s: %d/%d requests in window",
-            admin_id, limiter.max_requests, limiter.window_seconds,
+            admin_id,
+            limiter.max_requests,
+            limiter.window_seconds,
         )
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail={
                 "error": "rate_limit_exceeded",
-                "message": (
-                    f"Rate limit exceeded: {limiter.max_requests}"
-                    " mutations per minute."
-                ),
+                "message": (f"Rate limit exceeded: {limiter.max_requests} mutations per minute."),
                 "retry_after": info["reset"],
             },
             headers={"Retry-After": str(info["reset"])},

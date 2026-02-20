@@ -4,11 +4,13 @@
  * In production, the SvelteKit container talks to the api service.
  */
 
+import { TOKEN_KEY } from '$lib/constants';
+
 const BASE = '/api';
 
 function getToken(): string | null {
 	if (typeof localStorage === 'undefined') return null;
-	return localStorage.getItem('synapse_token');
+	return localStorage.getItem(TOKEN_KEY);
 }
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -46,7 +48,17 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 			import('$lib/stores/auth.svelte').then(({ auth }) => auth.expiredLogout());
 		}
 
-		throw new ApiError(res.status, body.detail || res.statusText);
+		let detail = body.detail || res.statusText;
+		if (Array.isArray(detail)) {
+			detail = detail.map((e: any) => e.msg || JSON.stringify(e)).join(', ');
+		} else if (typeof detail === 'object') {
+			detail = JSON.stringify(detail);
+		}
+		throw new ApiError(res.status, detail);
+	}
+
+	if (res.status === 204) {
+		return undefined as any;
 	}
 
 	return res.json();
@@ -107,11 +119,24 @@ export interface LeaderboardUser {
 	created_at: string | null;
 }
 
+/** Anonymized leaderboard entry (no PII) for unauthenticated visitors. */
+export interface AnonymousLeaderboardUser {
+	rank: number;
+	xp: number;
+	level: number;
+	gold: number;
+	xp_for_next: number;
+	xp_progress: number;
+}
+
 export interface LeaderboardResponse {
 	total: number;
 	page: number;
 	page_size: number;
-	users: LeaderboardUser[];
+	users: LeaderboardUser[] | AnonymousLeaderboardUser[];
+	authenticated: boolean;
+	/** Caller's own rank + stats (only when authenticated). */
+	my_rank?: LeaderboardUser;
 }
 
 export interface ActivityEvent {
@@ -121,7 +146,6 @@ export interface ActivityEvent {
 	avatar_url: string;
 	event_type: string;
 	xp_delta: number;
-	star_delta: number;
 	timestamp: string | null;
 	metadata: Record<string, unknown> | null;
 }
@@ -159,14 +183,92 @@ export interface RecentAchievement {
 
 export type PublicSettings = Record<string, unknown>;
 
+// ---------------------------------------------------------------------------
+// Member types
+// ---------------------------------------------------------------------------
+export interface MemberProfile {
+	user: {
+		id: string;
+		discord_name: string;
+		avatar_url: string;
+		xp: number;
+		level: number;
+		gold: number;
+		xp_for_next: number;
+		xp_progress: number;
+		created_at: string | null;
+	} | null;
+	ranks: {
+		xp: number | null;
+		gold: number | null;
+		total_users: number;
+	};
+	achievement_count: number;
+}
+
+export interface MemberAchievement {
+	id: number;
+	name: string;
+	description: string | null;
+	category: string | null;
+	rarity: string | null;
+	rarity_color: string;
+	xp_reward: number;
+	gold_reward: number;
+	badge_image: string | null;
+	earned_at: string | null;
+}
+
+export interface WhyTrace {
+	matched_rules: unknown[];
+	outcomes_applied: Record<string, unknown>;
+	context_snapshot: Record<string, unknown>;
+}
+
+export interface MemberActivityEvent {
+	id: number;
+	event_type: string;
+	xp_delta: number;
+	timestamp: string | null;
+	metadata: Record<string, unknown> | null;
+	why_trace: WhyTrace | null;
+}
+
+export interface ShopItem {
+	id: number;
+	name: string;
+	description: string | null;
+	item_type: string;
+	cost_xp: number | null;
+	cost_gold: number | null;
+	rarity_id: number | null;
+	overlay_id: number | null;
+	discord_role_id: string | null;
+	season_id: number | null;
+	active: boolean;
+	expires_at: string | null;
+	created_at: string | null;
+}
+
+export interface InventoryItem {
+	id: number;
+	item_id: number;
+	guild_id: string;
+	is_equipped: boolean;
+	purchased_at: string | null;
+	expires_at: string | null;
+}
+
 export const api = {
 	// Public
 	getMetrics: () => request<Metrics>('/metrics'),
 	getLeaderboard: (currency: string, page = 1, pageSize = 20) =>
 		request<LeaderboardResponse>(`/leaderboard/${encodeURIComponent(currency)}?page=${page}&page_size=${pageSize}`),
-	getActivity: (days = 30, limit = 100, eventType?: string) => {
+	getActivity: (days = 30, limit = 100, eventTypes?: string[]) => {
 		let url = `/activity?days=${days}&limit=${limit}`;
-		if (eventType) url += `&event_type=${encodeURIComponent(eventType)}`;
+		if (eventTypes && eventTypes.length > 0) {
+			eventTypes.forEach(et => url += `&event_type=${encodeURIComponent(et)}`);
+		}
 		return request<ActivityResponse>(url);
 	},
 	getAchievements: () => request<{ achievements: Achievement[] }>('/achievements'),
@@ -178,6 +280,32 @@ export const api = {
 
 	// Auth
 	getMe: () => request<{ id: string; username: string; avatar: string | null; is_admin: boolean }>('/auth/me'),
+
+	// Member
+	member: {
+		getProfile: () => request<MemberProfile>('/member/profile'),
+		getAchievements: () =>
+			request<{ achievements: MemberAchievement[] }>('/member/achievements'),
+		getActivity: (days = 30, limit = 50) =>
+			request<{ events: MemberActivityEvent[] }>(
+				`/member/activity?days=${days}&limit=${limit}`
+			),
+	},
+
+	// Shop (public + member)
+	shop: {
+		getItems: () => request<{ items: ShopItem[] }>('/shop/items'),
+		purchase: (itemId: number, currency: 'xp' | 'gold' = 'gold') =>
+			request<InventoryItem>(`/shop/${itemId}/purchase`, {
+				method: 'POST',
+				body: JSON.stringify({ currency }),
+			}),
+		getInventory: () => request<{ inventory: InventoryItem[] }>('/shop/inventory'),
+		equip: (itemId: number) =>
+			request<InventoryItem>(`/shop/inventory/${itemId}/equip`, { method: 'PATCH' }),
+		unequip: (itemId: number) =>
+			request<InventoryItem>(`/shop/inventory/${itemId}/unequip`, { method: 'PATCH' }),
+	},
 
 	// Admin
 	admin: {
@@ -248,14 +376,32 @@ export const api = {
 			uploadFormData('/admin/media', file),
 
 		// Media library
-		getMedia: () =>
-			request<{ files: MediaFileItem[] }>('/admin/media'),
-		uploadMedia: (file: File): Promise<{ id: number; url: string; original_name: string }> =>
-			uploadFormData('/admin/media', file),
-		updateMedia: (id: number, data: { alt_text?: string | null }) =>
-			request<{ id: number; alt_text: string | null }>(`/admin/media/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+		getMedia: (folderId?: number | null) =>
+			request<{ files: MediaFileItem[] }>(
+				folderId != null ? `/admin/media?folder_id=${folderId}` : '/admin/media'
+			),
+		uploadMedia: (
+			file: File,
+			folderId?: number | null
+		): Promise<{ id: number; url: string; original_name: string; folder_id: number | null }> =>
+			uploadFormData(
+				folderId != null ? `/admin/media?folder_id=${folderId}` : '/admin/media',
+				file
+			),
+		updateMedia: (id: number, data: { alt_text?: string | null; folder_id?: number | null }) =>
+			request<{ id: number; alt_text: string | null; folder_id: number | null }>(`/admin/media/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
 		deleteMedia: (id: number) =>
 			request<void>(`/admin/media/${id}`, { method: 'DELETE' }),
+
+		// Media folders
+		listFolders: () =>
+			request<{ folders: MediaFolder[] }>('/admin/folders'),
+		createFolder: (data: { name: string; parent_id?: number | null }) =>
+			request<MediaFolder>('/admin/folders', { method: 'POST', body: JSON.stringify(data) }),
+		renameFolder: (id: number, name: string) =>
+			request<MediaFolder>(`/admin/folders/${id}`, { method: 'PATCH', body: JSON.stringify({ name }) }),
+		deleteFolder: (id: number) =>
+			request<void>(`/admin/folders/${id}`, { method: 'DELETE' }),
 
 		awardXpGold: (data: ManualAwardPayload) =>
 			request<{ user_id: string; xp: number; gold: number; level: number }>(
@@ -364,6 +510,76 @@ export const api = {
 		// Uploads (uses unified media endpoint)
 		uploadFile: (file: File): Promise<{ url: string }> =>
 			uploadFormData('/admin/media', file),
+
+		// ---------------------------------------------------------------
+		// Reward Rules (Firewall)
+		// ---------------------------------------------------------------
+		getRules: () =>
+			request<{ rules: RewardRuleRow[] }>('/admin/rules'),
+		getRule: (id: number) =>
+			request<RewardRuleRow>(`/admin/rules/${id}`),
+		createRule: (data: RewardRuleCreate) =>
+			request<RewardRuleRow>('/admin/rules', { method: 'POST', body: JSON.stringify(data) }),
+		updateRule: (id: number, data: RewardRuleUpdate) =>
+			request<RewardRuleRow>(`/admin/rules/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+		deleteRule: (id: number) =>
+			request<{ deleted: boolean }>(`/admin/rules/${id}`, { method: 'DELETE' }),
+		reorderRules: (rules: { id: number; priority: number }[]) =>
+			request<{ updated: number }>('/admin/rules/reorder', { method: 'PATCH', body: JSON.stringify({ rules }) }),
+		publishSnapshot: () =>
+			request<RuleSnapshotRow>('/admin/rules/publish', { method: 'POST' }),
+		getSnapshots: (limit = 20) =>
+			request<{ snapshots: RuleSnapshotRow[] }>(`/admin/rules/snapshots?limit=${limit}`),
+		testRule: (data: RuleDryRunRequest) =>
+			request<RuleDryRunResult>('/admin/rules/test', { method: 'POST', body: JSON.stringify(data) }),
+		getTaxonomy: () =>
+			request<RuleTaxonomy>('/admin/rules/taxonomy'),
+		getEvaluations: (params: { page?: number; page_size?: number; user_id?: number | null; snapshot_id?: number | null } = {}) => {
+			const p = new URLSearchParams();
+			if (params.page) p.set('page', String(params.page));
+			if (params.page_size) p.set('page_size', String(params.page_size));
+			if (params.user_id && String(params.user_id).trim() !== '') p.set('user_id', String(params.user_id));
+			if (params.snapshot_id && String(params.snapshot_id).trim() !== '') p.set('snapshot_id', String(params.snapshot_id));
+			return request<RuleEvaluationListResponse>(`/admin/rules/evaluations?${p.toString()}`);
+		},
+		getProjectionStatus: () =>
+			request<ProjectionStatusResponse>('/admin/rules/projections/status'),
+
+		// ---------------------------------------------------------------
+		// Marketplace (Admin)
+		// ---------------------------------------------------------------
+		getMarketplaceItems: () =>
+			request<{ items: MarketplaceItemRow[] }>('/admin/marketplace/items'),
+		createMarketplaceItem: (data: MarketplaceItemCreate) =>
+			request<MarketplaceItemRow>('/admin/marketplace/items', { method: 'POST', body: JSON.stringify(data) }),
+		updateMarketplaceItem: (id: number, data: MarketplaceItemUpdate) =>
+			request<MarketplaceItemRow>(`/admin/marketplace/items/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+		deactivateMarketplaceItem: (id: number) =>
+			request<MarketplaceItemRow>(`/admin/marketplace/items/${id}/deactivate`, { method: 'PATCH' }),
+
+		// ---------------------------------------------------------------
+		// Observability (Phase 12)
+		// ---------------------------------------------------------------
+		getObservability: (params: ObservabilityQuery = {}) => {
+			const p = new URLSearchParams();
+			if (params.econ_hours) p.set('econ_hours', String(params.econ_hours));
+			if (params.anomaly_hours) p.set('anomaly_hours', String(params.anomaly_hours));
+			if (params.rule_hours) p.set('rule_hours', String(params.rule_hours));
+			if (params.earner_hours) p.set('earner_hours', String(params.earner_hours));
+			if (params.top_n) p.set('top_n', String(params.top_n));
+			return request<ObservabilityResponse>(`/admin/observability?${p.toString()}`);
+		},
+
+		// ---------------------------------------------------------------
+		// Cutover (Phase 13)
+		// ---------------------------------------------------------------
+		getCutoverStatus: () =>
+			request<CutoverStatus>('/admin/cutover'),
+		toggleCutoverFlag: (flag: string, enabled: boolean) =>
+			request<ToggleResponse>('/admin/cutover/toggle', {
+				method: 'POST',
+				body: JSON.stringify({ flag, enabled }),
+			}),
 	},
 };
 
@@ -376,14 +592,12 @@ export interface TypeDefault {
 	channel_type: string;
 	event_type: string;
 	xp_multiplier: number;
-	star_multiplier: number;
 }
 
 export interface TypeDefaultUpsert {
 	channel_type: string;
 	event_type: string;
 	xp_multiplier: number;
-	star_multiplier: number;
 }
 
 export interface ChannelOverrideRow {
@@ -392,7 +606,6 @@ export interface ChannelOverrideRow {
 	channel_id: string;
 	event_type: string;
 	xp_multiplier: number;
-	star_multiplier: number;
 	reason: string | null;
 }
 
@@ -400,7 +613,6 @@ export interface ChannelOverrideUpsert {
 	channel_id: string;
 	event_type: string;
 	xp_multiplier: number;
-	star_multiplier: number;
 	reason?: string;
 }
 
@@ -509,7 +721,15 @@ export interface MediaFileItem {
 	content_type: string | null;
 	size_bytes: number;
 	alt_text: string | null;
+	folder_id: number | null;
 	uploaded_at: string | null;
+}
+
+export interface MediaFolder {
+	id: number;
+	name: string;
+	parent_id: number | null;
+	created_at: string | null;
 }
 
 export interface ManualAwardPayload {
@@ -776,4 +996,286 @@ export interface CardUpdatePayload {
 	subtitle?: string;
 	config_json?: Record<string, unknown>;
 	visible?: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Admin types — Reward Rules (Firewall)
+// ---------------------------------------------------------------------------
+export interface RewardRuleRow {
+	id: number;
+	guild_id: string;
+	name: string;
+	predicates: RulePredicate[];
+	outcomes: RuleOutcome[];
+	priority: number;
+	is_active: boolean;
+	created_at: string | null;
+	updated_at: string | null;
+}
+
+export interface RulePredicate {
+	field: string;
+	op: string;
+	value: unknown;
+}
+
+export interface RuleOutcome {
+	type: string;
+	base_value?: number;
+	scaling?: {
+		curve: string;
+		variable: string;
+		factor?: number;
+		base?: number;
+		thresholds?: Record<string, number>;
+	};
+	template_name?: string;
+	template_id?: number;
+}
+
+export interface RewardRuleCreate {
+	name: string;
+	predicates?: RulePredicate[];
+	outcomes?: RuleOutcome[];
+	priority?: number;
+	is_active?: boolean;
+}
+
+export interface RewardRuleUpdate {
+	name?: string;
+	predicates?: RulePredicate[];
+	outcomes?: RuleOutcome[];
+	priority?: number;
+	is_active?: boolean;
+}
+
+export interface RuleSnapshotRow {
+	id: number;
+	guild_id: string;
+	version: number;
+	rules_json: Record<string, unknown>[];
+	rules_count: number;
+	published_by: string | null;
+	published_at: string | null;
+	is_active: boolean;
+}
+
+export interface RuleDryRunRequest {
+	event_lake_id?: number;
+	event_type?: string;
+	user_id?: number;
+	channel_id?: number;
+	metadata?: Record<string, unknown>;
+	context?: Record<string, unknown>;
+	rule_ids?: number[];
+}
+
+export interface RuleDryRunResult {
+	matched_rules: {
+		rule_id: number;
+		rule_name: string;
+		priority: number;
+		outcomes: Record<string, unknown>;
+	}[];
+	outcomes_applied: Record<string, unknown>;
+	context_snapshot: Record<string, unknown>;
+	rules_tested: number;
+}
+
+export interface RuleTaxonomy {
+	interaction_types: { value: string; label: string }[];
+	event_lake_types: { value: string; label: string }[];
+	observed_types: { event_type: string; count: number }[];
+	operators: { op: string; label: string }[];
+	scaling_curves: { value: string; label: string }[];
+	context_variables: { name: string; label: string; type: string }[];
+	predicate_fields: { field: string; label: string; type: string }[];
+}
+
+export interface RuleEvaluationRow {
+	id: number;
+	user_id: string | null;
+	event_lake_id: string | null;
+	snapshot_id: number | null;
+	matched_rules: Record<string, unknown>[];
+	outcomes_applied: Record<string, unknown>;
+	context_snapshot: Record<string, unknown>;
+	evaluated_at: string | null;
+}
+
+export interface RuleEvaluationListResponse {
+	total: number;
+	page: number;
+	page_size: number;
+	evaluations: RuleEvaluationRow[];
+}
+
+export interface ProjectionStatusResponse {
+	latest_evaluation_id: number;
+	total_evaluations: number;
+	workers: {
+		worker_id: string;
+		last_processed_id: number;
+		updated_at: string | null;
+		lag: number;
+	}[];
+}
+
+// ---------------------------------------------------------------------------
+// Admin types — Marketplace
+// ---------------------------------------------------------------------------
+export interface MarketplaceItemRow {
+	id: number;
+	name: string;
+	description: string | null;
+	item_type: string;
+	cost_xp: number | null;
+	cost_gold: number | null;
+	rarity_id: number | null;
+	overlay_id: number | null;
+	image_url: string | null;
+	discord_role_id: string | null;
+	season_id: number | null;
+	active: boolean;
+	expires_at: string | null;
+	created_at: string | null;
+}
+
+export interface MarketplaceItemCreate {
+	name: string;
+	description?: string;
+	item_type?: string;
+	cost_xp?: number | null;
+	cost_gold?: number | null;
+	rarity_id?: number | null;
+	overlay_id?: number | null;
+	image_url?: string | null;
+	discord_role_id?: number | null;
+	season_id?: number | null;
+	expires_at?: string | null;
+}
+
+export interface MarketplaceItemUpdate {
+	name?: string;
+	description?: string;
+	item_type?: string;
+	cost_xp?: number | null;
+	cost_gold?: number | null;
+	rarity_id?: number | null;
+	overlay_id?: number | null;
+	image_url?: string | null;
+	discord_role_id?: number | null;
+	season_id?: number | null;
+	active?: boolean;
+	expires_at?: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Admin types — Observability (Phase 12)
+// ---------------------------------------------------------------------------
+export interface ObservabilityQuery {
+	econ_hours?: number;
+	anomaly_hours?: number;
+	rule_hours?: number;
+	earner_hours?: number;
+	top_n?: number;
+}
+
+export interface BotHealth {
+	status: string;
+	last_heartbeat: string | null;
+	age_seconds: number | null;
+}
+
+export interface DbPoolStats {
+	pool_size: number;
+	checked_out: number;
+	overflow: number;
+	checked_in: number;
+}
+
+export interface SystemHealth {
+	bot: BotHealth;
+	api_uptime_seconds: number;
+	db_pool: DbPoolStats;
+	last_event_at: string | null;
+	last_activity_at: string | null;
+}
+
+export interface EconomicBucket {
+	hour: string;
+	xp_issued: number;
+	gold_issued: number;
+}
+
+export interface AnomalyEntry {
+	kind: string;
+	severity: string;
+	message: string;
+	details: Record<string, unknown>;
+}
+
+export interface RulePerformanceBucket {
+	rule_id: number;
+	rule_name: string;
+	hour: string;
+	match_count: number;
+}
+
+export interface TopEarner {
+	user_id: string;
+	user_name: string | null;
+	event_type: string;
+	total_xp: number;
+	total_gold: number;
+	event_count: number;
+}
+
+export interface ObservabilityResponse {
+	health: SystemHealth;
+	economic_histogram: EconomicBucket[];
+	anomalies: AnomalyEntry[];
+	rule_performance: RulePerformanceBucket[];
+	top_earners: TopEarner[];
+}
+
+// ---------------------------------------------------------------------------
+// Admin types — Feature Flag Cutover (Phase 13)
+// ---------------------------------------------------------------------------
+
+export interface FlagMonitoring {
+	metrics: Record<string, unknown>;
+	status: string;
+	summary: string;
+}
+
+export interface PreflightCheck {
+	label: string;
+	passed: boolean;
+	detail: string;
+}
+
+export interface CutoverFlag {
+	key: string;
+	label: string;
+	order: number;
+	enabled: boolean;
+	description: string;
+	prerequisites: string[];
+	preflight_checks: PreflightCheck[];
+	monitoring: FlagMonitoring;
+	can_enable: boolean;
+	blockers: string[];
+	enabled_at: string | null;
+}
+
+export interface CutoverStatus {
+	flags: CutoverFlag[];
+	overall_status: string;
+}
+
+export interface ToggleResponse {
+	flag: string;
+	enabled: boolean;
+	message: string;
 }

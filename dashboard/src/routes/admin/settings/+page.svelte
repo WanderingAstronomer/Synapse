@@ -57,6 +57,11 @@
 		'display.leaderboard_title': { type: 'string', description: 'Display name for the leaderboard page. Shown in the sidebar and page header. Default: "Leaderboard"' },
 		'display.activity_title': { type: 'string', description: 'Display name for the activity page. Shown in the sidebar and page header. Default: "Activity"' },
 		'display.achievements_title': { type: 'string', description: 'Display name for the achievements page. Shown in the sidebar and page header. Default: "Achievements"' },
+		// Feature flags (managed via Cutover page — shown here as read-only context)
+		'flags.projection_workers_enabled': { type: 'boolean', description: 'Run async projection workers. Toggle via Admin → Cutover for safe ordering.' },
+		'flags.firewall_enabled': { type: 'boolean', description: 'Route events through the RuleEngine. Toggle via Admin → Cutover for safe ordering.' },
+		'flags.three_tier_auth_enabled': { type: 'boolean', description: 'Allow non-admin guild members to log in. Toggle via Admin → Cutover for safe ordering.' },
+		'flags.marketplace_enabled': { type: 'boolean', description: 'Enable shop endpoints and purchase flow. Toggle via Admin → Cutover for safe ordering.' },
 	};
 
 	/** Infer type from a setting value if not in the metadata map */
@@ -99,6 +104,11 @@
 			// Announcements
 			'announcements.achievement_channel_enabled': 'Post Achievements & Level-Ups',
 			'announcements.leaderboard_public':          'Public Leaderboard Visible',
+			// Feature Flags
+			'flags.projection_workers_enabled': 'Projection Workers',
+			'flags.firewall_enabled':           'Rule Engine Firewall',
+			'flags.three_tier_auth_enabled':    'Three-Tier Auth',
+			'flags.marketplace_enabled':        'Marketplace',
 		};
 		return (key: string) => map[key] || key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 	});
@@ -110,6 +120,7 @@
 		quality:        { icon: '', label: 'Quality',          description: 'Bonus multipliers for high-quality content' },
 		announcements:  { icon: '', label: 'Announcements',   description: 'Achievement and level-up notification settings' },
 		display:        { icon: '', label: 'Display',          description: 'Branding, titles, and UI settings' },
+		flags:          { icon: '', label: 'Feature Flags',    description: 'Production feature toggles — manage via the Cutover page for safe ordering' },
 		setup:          { icon: '', label: 'Setup',            description: 'Bootstrap and initialization state (read-only)' },
 		dangerous:      { icon: '', label: 'Danger Zone',     description: 'Settings that can significantly affect the game', danger: true },
 	};
@@ -135,7 +146,7 @@
 	);
 
 	/** Group settings by category */
-	const grouped = $derived(() => {
+	const grouped = $derived.by(() => {
 		const groups: Record<string, AdminSetting[]> = {};
 		for (const s of filtered) {
 			const cat = s.category || 'other';
@@ -276,7 +287,7 @@
 		</div>
 	</div>
 {:else}
-	{@const groups = grouped()}
+	{@const groups = grouped}
 	{#each Object.entries(groups) as [cat, catSettings] (cat)}
 		{@const meta = CATEGORY_META[cat]}
 		<div class="settings-group mb-6 {meta?.danger ? 'danger-zone' : ''}">

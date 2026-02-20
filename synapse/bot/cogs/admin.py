@@ -40,12 +40,14 @@ logger = logging.getLogger(__name__)
 
 def is_admin():
     """Decorator that checks if the user has the configured admin role."""
+
     async def predicate(interaction: discord.Interaction) -> bool:
         bot: SynapseBot = interaction.client  # type: ignore[assignment]
         if not interaction.user or not hasattr(interaction.user, "roles"):
             return False
         admin_role_id = bot.cfg.admin_role_id
         return any(role.id == admin_role_id for role in interaction.user.roles)
+
     return app_commands.check(predicate)
 
 
@@ -102,7 +104,8 @@ class Admin(commands.Cog, name="Admin"):
             + f"Reason: {reason}"
         )
         await interaction.response.send_message(
-            f"✅ {summary}", ephemeral=True,
+            f"✅ {summary}",
+            ephemeral=True,
         )
 
         # Public announcement via shared service (preference-gated)
@@ -147,7 +150,7 @@ class Admin(commands.Cog, name="Admin"):
         interaction: discord.Interaction,
         name: str,
         description: str,
-        requirement_type: str = "custom",
+        requirement_type: str = "manual",
         requirement_field: str | None = None,
         requirement_value: int | None = None,
         xp_reward: int = 0,
@@ -155,18 +158,33 @@ class Admin(commands.Cog, name="Admin"):
         rarity: str = "common",
     ) -> None:
         """Create a new achievement template."""
+        # Map the slash-command params to the v2 admin_service signature
+        trigger_config: dict | None = None
+        if requirement_field or requirement_value is not None:
+            trigger_config = {
+                "field": requirement_field,
+                "value": requirement_value,
+            }
+
+        # Resolve rarity name → rarity_id via guild config cache
+        guild_id = interaction.guild_id or 0
+        rarity_id: int | None = None
+        for r in self.bot.cache.get_achievement_rarities(guild_id):
+            if r.name.lower() == rarity.lower():
+                rarity_id = r.id
+                break
+
         tmpl = await run_db(
             create_achievement,
             self.bot.engine,
-            guild_id=interaction.guild_id or 0,
+            guild_id=guild_id,
             name=name,
             description=description,
-            requirement_type=requirement_type,
-            requirement_field=requirement_field,
-            requirement_value=requirement_value,
+            trigger_type=requirement_type,
+            trigger_config=trigger_config,
             xp_reward=xp_reward,
             gold_reward=gold_reward,
-            rarity=rarity,
+            rarity_id=rarity_id,
             actor_id=interaction.user.id,
         )
 
@@ -175,14 +193,20 @@ class Admin(commands.Cog, name="Admin"):
             description=f"**{tmpl.name}**\n{tmpl.description or ''}",
             color=discord.Color.purple(),
         )
-        embed.add_field(name="Type", value=tmpl.requirement_type, inline=True)
-        embed.add_field(name="Rarity", value=tmpl.rarity, inline=True)
+        embed.add_field(name="Type", value=tmpl.trigger_type, inline=True)
+        embed.add_field(
+            name="Rarity",
+            value=tmpl.rarity.name if tmpl.rarity else "None",
+            inline=True,
+        )
         embed.add_field(name="XP Reward", value=str(tmpl.xp_reward), inline=True)
         await interaction.response.send_message(embed=embed)
 
     @create_ach.autocomplete("rarity")
     async def _rarity_autocomplete(
-        self, interaction: discord.Interaction, current: str,
+        self,
+        interaction: discord.Interaction,
+        current: str,
     ) -> list[app_commands.Choice[str]]:
         """Dynamic rarity autocomplete from per-guild DB config."""
         guild_id = interaction.guild_id or 0
@@ -226,7 +250,8 @@ class Admin(commands.Cog, name="Admin"):
         if success:
             # Ephemeral confirmation to admin
             await interaction.response.send_message(
-                f"✅ {msg}", ephemeral=True,
+                f"✅ {msg}",
+                ephemeral=True,
             )
             # Public rich announcement via shared service (preference-gated)
             await announce_achievement_grant(

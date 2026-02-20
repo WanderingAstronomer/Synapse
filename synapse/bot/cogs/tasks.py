@@ -77,11 +77,14 @@ class PeriodicTasks(commands.Cog):
 
         try:
             result = await run_db(
-                run_retention_cleanup, self.bot.engine, retention_days,
+                run_retention_cleanup,
+                self.bot.engine,
+                retention_days,
             )
             logger.info(
                 "Retention task complete: %d events, %d counters deleted",
-                result["events_deleted"], result["counters_deleted"],
+                result["events_deleted"],
+                result["counters_deleted"],
             )
         except Exception:
             logger.exception("Retention task failed", extra={"task": "retention"})
@@ -102,7 +105,8 @@ class PeriodicTasks(commands.Cog):
             result = await run_db(reconcile_counters, self.bot.engine)
             logger.info(
                 "Reconciliation task complete: checked=%d corrected=%d",
-                result["checked"], result["corrected"],
+                result["checked"],
+                result["corrected"],
             )
         except Exception:
             logger.exception("Reconciliation task failed", extra={"task": "reconciliation"})

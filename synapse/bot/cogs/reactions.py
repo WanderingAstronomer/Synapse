@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 
 class Reactions(commands.Cog, name="Reactions"):
-    """Awards XP and Stars for giving and receiving reactions."""
+    """Awards XP for giving and receiving reactions."""
 
     def __init__(self, bot: SynapseBot) -> None:
         self.bot = bot
@@ -40,16 +40,22 @@ class Reactions(commands.Cog, name="Reactions"):
         """Fire when any reaction is added, even on uncached messages."""
         logger.debug(
             "Gateway event: REACTION_ADD from user %s on message %s in channel %s",
-            payload.user_id, payload.message_id, payload.channel_id,
+            payload.user_id,
+            payload.message_id,
+            payload.channel_id,
         )
         try:
             await self._handle_reaction(payload)
         except Exception:
             logger.exception(
                 "Error processing reaction on message %s from user %s",
-                payload.message_id, payload.user_id,
-                extra={"event_type": "reaction_add", "user_id": payload.user_id,
-                       "message_id": payload.message_id},
+                payload.message_id,
+                payload.user_id,
+                extra={
+                    "event_type": "reaction_add",
+                    "user_id": payload.user_id,
+                    "message_id": payload.message_id,
+                },
             )
 
     @commands.Cog.listener()
@@ -69,9 +75,13 @@ class Reactions(commands.Cog, name="Reactions"):
         except Exception:
             logger.exception(
                 "Error processing reaction remove on message %s from user %s",
-                payload.message_id, payload.user_id,
-                extra={"event_type": "reaction_remove", "user_id": payload.user_id,
-                       "message_id": payload.message_id},
+                payload.message_id,
+                payload.user_id,
+                extra={
+                    "event_type": "reaction_remove",
+                    "user_id": payload.user_id,
+                    "message_id": payload.message_id,
+                },
             )
 
     async def _handle_reaction(self, payload: discord.RawReactionActionEvent) -> None:
@@ -156,9 +166,9 @@ class Reactions(commands.Cog, name="Reactions"):
 
         # Approximate unique reactor count from reaction totals (avoids
         # expensive per-reaction ``reaction.users()`` API calls).
-        unique_reactor_estimate = sum(
-            r.count for r in message.reactions
-        ) - 1  # subtract 1 for the bot's own potential reaction
+        unique_reactor_estimate = (
+            sum(r.count for r in message.reactions) - 1
+        )  # subtract 1 for the bot's own potential reaction
         unique_reactor_estimate = max(unique_reactor_estimate, 1)
 
         received_event = SynapseEvent(

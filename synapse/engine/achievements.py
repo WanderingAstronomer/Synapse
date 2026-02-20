@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from synapse.database.models import InteractionType, TriggerType
@@ -55,27 +56,27 @@ class AchievementContext:
     user_xp : Total accumulated XP (after this event's delta).
     user_level : Current level (after any level-up).
     old_level : Level before this event (None if not a level-up event).
-    season_stars : Stars earned this season.
-    lifetime_stars : Stars earned across all seasons.
     stats : Dict of UserStats column values (e.g. {"messages_sent": 105}).
     event_type : The InteractionType that triggered this check (or None).
     event_counts : Mapping of event_type string → total occurrences for
         this user.  Populated from activity_log when needed.
+    member_since : When the user first appeared (User.created_at).
+        Used by the ``member_tenure`` trigger handler.
     """
 
     user_xp: int = 0
     user_level: int = 1
     old_level: int | None = None
-    season_stars: int = 0
-    lifetime_stars: int = 0
     stats: dict[str, int] = field(default_factory=dict)
     event_type: InteractionType | None = None
     event_counts: dict[str, int] = field(default_factory=dict)
+    member_since: datetime | None = None
 
 
 # ---------------------------------------------------------------------------
 # Trigger handlers — pure functions (config, ctx) → bool
 # ---------------------------------------------------------------------------
+
 
 def _check_stat_threshold(config: dict, ctx: AchievementContext) -> bool:
     """Fires when a UserStats field reaches a threshold value.
@@ -100,19 +101,6 @@ def _check_xp_milestone(config: dict, ctx: AchievementContext) -> bool:
     if value is None:
         return False
     return ctx.user_xp >= value
-
-
-def _check_star_milestone(config: dict, ctx: AchievementContext) -> bool:
-    """Fires when stars reach a threshold.
-
-    Config: {"scope": "season"|"lifetime", "value": 500}
-    """
-    scope = config.get("scope", "season")
-    value = config.get("value")
-    if value is None:
-        return False
-    check_value = ctx.season_stars if scope == "season" else ctx.lifetime_stars
-    return check_value >= value
 
 
 def _check_level_reached(config: dict, ctx: AchievementContext) -> bool:
@@ -171,10 +159,21 @@ def _check_member_tenure(config: dict, ctx: AchievementContext) -> bool:
 
     Config: {"days": 365}
 
-    NOTE: Not yet wired — requires join date tracking.  Returns False
-    until the infrastructure exists.
+    Uses ``ctx.member_since`` (populated from ``User.created_at`` which
+    records the first time Synapse observed the member).
     """
-    return False
+    if ctx.member_since is None:
+        return False
+    days_required = config.get("days")
+    if days_required is None:
+        return False
+    now = datetime.now(UTC)
+    # Ensure member_since is timezone-aware for comparison
+    member_since = ctx.member_since
+    if member_since.tzinfo is None:
+        member_since = member_since.replace(tzinfo=UTC)
+    elapsed = (now - member_since).days
+    return elapsed >= int(days_required)
 
 
 def _check_invite_count(config: dict, ctx: AchievementContext) -> bool:
@@ -182,9 +181,15 @@ def _check_invite_count(config: dict, ctx: AchievementContext) -> bool:
 
     Config: {"count": 10}
 
-    NOTE: Not yet wired — requires invite tracking infrastructure.
-    Returns False until the infrastructure exists.
+    Deferred — requires Discord invite tracking infrastructure that is not
+    yet implemented.  Invite data is not available through the Gateway
+    without privileged intents and periodic polling.
     """
+    logger.warning(
+        "invite_count trigger evaluated but invite tracking is not yet implemented "
+        "— achievement will never fire (config=%s)",
+        config,
+    )
     return False
 
 
@@ -194,7 +199,6 @@ def _check_invite_count(config: dict, ctx: AchievementContext) -> bool:
 TRIGGER_HANDLERS: dict[str, Callable[[dict, AchievementContext], bool]] = {
     TriggerType.STAT_THRESHOLD: _check_stat_threshold,
     TriggerType.XP_MILESTONE: _check_xp_milestone,
-    TriggerType.STAR_MILESTONE: _check_star_milestone,
     TriggerType.LEVEL_REACHED: _check_level_reached,
     TriggerType.LEVEL_INTERVAL: _check_level_interval,
     TriggerType.EVENT_COUNT: _check_event_count,
@@ -242,7 +246,8 @@ def check_achievements(
             and template.series_order > 1
         ):
             predecessor = cache.get_series_predecessor(
-                template.series_id, template.series_order,
+                template.series_id,
+                template.series_order,
             )
             if predecessor is not None and predecessor.id not in already_earned:
                 continue
@@ -258,7 +263,9 @@ def check_achievements(
             newly_earned.append(template.id)
             logger.info(
                 "Achievement triggered: %s (id=%d) for guild %d",
-                template.name, template.id, guild_id,
+                template.name,
+                template.id,
+                guild_id,
             )
 
     return newly_earned

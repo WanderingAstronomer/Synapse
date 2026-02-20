@@ -1,3 +1,6 @@
+/** LocalStorage key for the JWT token */
+export const TOKEN_KEY = 'synapse_token';
+
 /** Category icons mapped by keyword pattern */
 export const CATEGORY_ICONS: Record<string, string> = {};
 
@@ -44,13 +47,19 @@ export const NAV_LINKS = {
 		{ slug: 'activity', href: '/activity', label: 'Activity', icon: '' },
 		{ slug: 'achievements', href: '/achievements', label: 'Achievements', icon: '' },
 	],
+	member: [
+		{ href: '/profile', label: 'My Profile', icon: '' },
+	],
 	admin: [
-		{ href: '/admin/reward-rules', label: 'Reward Rules', icon: '' },
+		{ href: '/admin/rules', label: 'Rule Engine', icon: '' },
 		{ href: '/admin/achievements', label: 'Achievements', icon: '' },
+		{ href: '/admin/marketplace', label: 'Marketplace', icon: '' },
 		{ href: '/admin/awards', label: 'Awards', icon: '' },
 		{ href: '/admin/media', label: 'Media', icon: '' },
 		{ href: '/admin/data-sources', label: 'Event Lake', icon: '' },
 		{ href: '/admin/settings', label: 'Settings', icon: '' },
+		{ href: '/admin/observability', label: 'Observability', icon: '' },
+		{ href: '/admin/cutover', label: 'Cutover', icon: '' },
 		{ href: '/admin/logs', label: 'Logs', icon: '' },
 	]
 };

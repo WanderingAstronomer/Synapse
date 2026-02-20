@@ -5,13 +5,17 @@ synapse.api.routes.public — Read-only public endpoints
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime, timedelta
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+import jwt
+from fastapi import APIRouter, Depends, Header, Query
+from jwt.exceptions import InvalidTokenError
 from sqlalchemy import distinct, func, select
 from sqlalchemy.orm import Session
 
-from synapse.api.deps import get_session
+from synapse.api.deps import JWT_ALGORITHM, JWT_SECRET, get_session
 from synapse.constants import xp_for_level
 from synapse.database.models import (
     AchievementCategory,
@@ -23,6 +27,8 @@ from synapse.database.models import (
     UserAchievement,
 )
 from synapse.services.settings_service import get_setting_value
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["public"])
 
@@ -64,18 +70,20 @@ def get_metrics(session: Session = Depends(get_session)):
     total_gold = session.scalar(select(func.coalesce(func.sum(User.gold), 0))) or 0
 
     week_ago = datetime.now(UTC) - timedelta(days=7)
-    active_users = session.scalar(
-        select(func.count(distinct(ActivityLog.user_id)))
-        .where(ActivityLog.timestamp >= week_ago)
-    ) or 0
+    active_users = (
+        session.scalar(
+            select(func.count(distinct(ActivityLog.user_id))).where(
+                ActivityLog.timestamp >= week_ago
+            )
+        )
+        or 0
+    )
 
-    top_level = session.scalar(
-        select(func.coalesce(func.max(User.level), 1))
-    ) or 1
+    top_level = session.scalar(select(func.coalesce(func.max(User.level), 1))) or 1
 
-    total_achievements_earned = session.scalar(
-        select(func.count()).select_from(UserAchievement)
-    ) or 0
+    total_achievements_earned = (
+        session.scalar(select(func.count()).select_from(UserAchievement)) or 0
+    )
 
     return {
         "total_users": total_users,
@@ -88,6 +96,27 @@ def get_metrics(session: Session = Depends(get_session)):
 
 
 # ---------------------------------------------------------------------------
+# Auth helpers for optional member detection
+# ---------------------------------------------------------------------------
+def _parse_member_id(
+    authorization: str | None,
+) -> int | None:
+    """Extract user ID from a Bearer JWT without raising.
+
+    Returns the user ID (int) on success, None if the header is
+    missing, malformed, or the token is invalid/expired.
+    """
+    if not authorization or not authorization.startswith("Bearer "):
+        return None
+    token = authorization.split(" ", 1)[1]
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        return int(payload["sub"])
+    except (InvalidTokenError, KeyError, ValueError):
+        return None
+
+
+# ---------------------------------------------------------------------------
 # GET /leaderboard/{currency}
 # ---------------------------------------------------------------------------
 @router.get("/leaderboard/{currency}")
@@ -95,12 +124,24 @@ def get_leaderboard(
     currency: str,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
+    authorization: Annotated[str | None, Header()] = None,
     session: Session = Depends(get_session),
 ):
-    """Paginated leaderboard by xp, gold, or level."""
+    """Paginated leaderboard by xp, gold, or level.
+
+    Privacy behaviour
+    -----------------
+    * **No auth (Tier 1):** PII fields (``discord_name``, ``avatar_url``)
+      are stripped.  Only rank, value columns, and level are returned.
+    * **Valid member token:** Full user data is returned, plus a
+      ``my_rank`` object with the caller's own position.
+    """
     order_col = {"xp": User.xp, "gold": User.gold, "level": User.level}.get(currency)
     if order_col is None:
         order_col = User.xp
+
+    caller_id = _parse_member_id(authorization)
+    is_authenticated = caller_id is not None
 
     total = session.scalar(select(func.count()).select_from(User)) or 0
     offset = (page - 1) * page_size
@@ -109,15 +150,51 @@ def get_leaderboard(
         select(User).order_by(order_col.desc(), User.id).offset(offset).limit(page_size)
     ).all()
 
-    return {
+    if is_authenticated:
+        users = [{**_user_dict(u), "rank": offset + i + 1} for i, u in enumerate(rows)]
+    else:
+        # Anonymized: strip PII, keep rank + value columns
+        users = [
+            {
+                "rank": offset + i + 1,
+                "xp": u.xp,
+                "level": u.level,
+                "gold": u.gold,
+                "xp_for_next": xp_for_level(u.level + 1),
+                "xp_progress": u.xp / max(xp_for_level(u.level + 1), 1),
+            }
+            for i, u in enumerate(rows)
+        ]
+
+    result: dict = {
         "total": total,
         "page": page,
         "page_size": page_size,
-        "users": [
-            {**_user_dict(u), "rank": offset + i + 1}
-            for i, u in enumerate(rows)
-        ],
+        "users": users,
+        "authenticated": is_authenticated,
     }
+
+    # Append caller's own rank when authenticated
+    if is_authenticated and caller_id is not None:
+        sub = (
+            select(
+                User.id,
+                func.row_number()
+                .over(order_by=[order_col.desc(), User.id])
+                .label("rank"),
+            )
+        ).subquery()
+        my_row = session.execute(
+            select(sub.c.rank).where(sub.c.id == caller_id)
+        ).scalar_one_or_none()
+        caller = session.get(User, caller_id)
+        if caller and my_row is not None:
+            result["my_rank"] = {
+                **_user_dict(caller),
+                "rank": int(my_row),
+            }
+
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -127,10 +204,14 @@ def get_leaderboard(
 def get_activity(
     days: int = Query(30, ge=1, le=365),
     limit: int = Query(100, ge=1, le=500),
-    event_type: str | None = Query(None),
+    event_type: list[str] | None = Query(None),
+    authorization: Annotated[str | None, Header()] = None,
     session: Session = Depends(get_session),
 ):
     """Recent activity feed + daily aggregation for charts."""
+    caller_id = _parse_member_id(authorization)
+    is_authenticated = caller_id is not None
+
     since = datetime.now(UTC) - timedelta(days=days)
     query = (
         select(ActivityLog)
@@ -138,51 +219,51 @@ def get_activity(
         .order_by(ActivityLog.timestamp.desc())
     )
     if event_type:
-        query = query.where(ActivityLog.event_type == event_type)
+        query = query.where(ActivityLog.event_type.in_(event_type))
     query = query.limit(limit)
 
     logs = session.scalars(query).all()
 
     # Build daily aggregation
-    daily_query = (
-        select(
-            func.date_trunc("day", ActivityLog.timestamp).label("day"),
-            ActivityLog.event_type,
-            func.count().label("cnt"),
-        )
-        .where(ActivityLog.timestamp >= since)
-    )
+    daily_query = select(
+        func.date_trunc("day", ActivityLog.timestamp).label("day"),
+        ActivityLog.event_type,
+        func.count().label("cnt"),
+    ).where(ActivityLog.timestamp >= since)
     if event_type:
-        daily_query = daily_query.where(ActivityLog.event_type == event_type)
-    daily_query = (
-        daily_query
-        .group_by("day", ActivityLog.event_type)
-        .order_by("day")
-    )
+        daily_query = daily_query.where(ActivityLog.event_type.in_(event_type))
+    daily_query = daily_query.group_by("day", ActivityLog.event_type).order_by("day")
     daily_rows = session.execute(daily_query).all()
 
     # Build user lookup for activity entries
     user_ids = {log.user_id for log in logs}
-    users = {
-        u.id: u for u in session.scalars(
-            select(User).where(User.id.in_(user_ids))
-        ).all()
-    } if user_ids else {}
+    users = (
+        {u.id: u for u in session.scalars(select(User).where(User.id.in_(user_ids))).all()}
+        if user_ids
+        else {}
+    )
 
     events = []
     for log in logs:
         u = users.get(log.user_id)
-        events.append({
-            "id": log.id,
-            "user_id": str(log.user_id),
-            "user_name": u.discord_name if u else "Unknown",
-            "avatar_url": _avatar_url(log.user_id, u.discord_avatar_hash if u else None),
-            "event_type": log.event_type,
-            "xp_delta": log.xp_delta,
-            "star_delta": log.star_delta,
-            "timestamp": log.timestamp.isoformat() if log.timestamp else None,
-            "metadata": log.metadata_,
-        })
+        user_name = "Unknown"
+        if u:
+            user_name = u.discord_name if is_authenticated else "Anonymous Member"
+
+        events.append(
+            {
+                "id": log.id,
+                "user_id": str(log.user_id),
+                "user_name": user_name,
+                "avatar_url": _avatar_url(
+                    log.user_id, u.discord_avatar_hash if (u and is_authenticated) else None
+                ),
+                "event_type": log.event_type,
+                "xp_delta": log.xp_delta,
+                "timestamp": log.timestamp.isoformat() if log.timestamp else None,
+                "metadata": log.metadata_,
+            }
+        )
 
     daily: dict[str, dict[str, int]] = {}
     for row in daily_rows:
@@ -211,13 +292,10 @@ def get_achievements(session: Session = Depends(get_session)):
     ).all()
 
     # Count earners per achievement
-    earn_counts_q = (
-        select(
-            UserAchievement.achievement_id,
-            func.count().label("cnt"),
-        )
-        .group_by(UserAchievement.achievement_id)
-    )
+    earn_counts_q = select(
+        UserAchievement.achievement_id,
+        func.count().label("cnt"),
+    ).group_by(UserAchievement.achievement_id)
     earn_counts = {row.achievement_id: row.cnt for row in session.execute(earn_counts_q).all()}
 
     total_users = session.scalar(select(func.count()).select_from(User)) or 1
@@ -238,9 +316,7 @@ def get_achievements(session: Session = Depends(get_session)):
                     else None
                 ),
                 "rarity": (
-                    rarities[t.rarity_id].name
-                    if t.rarity_id and t.rarity_id in rarities
-                    else None
+                    rarities[t.rarity_id].name if t.rarity_id and t.rarity_id in rarities else None
                 ),
                 "rarity_color": (
                     rarities[t.rarity_id].color
@@ -251,9 +327,7 @@ def get_achievements(session: Session = Depends(get_session)):
                 "gold_reward": t.gold_reward,
                 "badge_image": t.badge_image,
                 "earner_count": earn_counts.get(t.id, 0),
-                "earn_pct": round(
-                    earn_counts.get(t.id, 0) / total_users * 100, 1
-                ),
+                "earn_pct": round(earn_counts.get(t.id, 0) / total_users * 100, 1),
                 "series_id": t.series_id,
                 "series_order": t.series_order,
             }
@@ -268,9 +342,13 @@ def get_achievements(session: Session = Depends(get_session)):
 @router.get("/achievements/recent")
 def get_recent_achievements(
     limit: int = Query(10, ge=1, le=50),
+    authorization: Annotated[str | None, Header()] = None,
     session: Session = Depends(get_session),
 ):
     """Recently earned achievements."""
+    caller_id = _parse_member_id(authorization)
+    is_authenticated = caller_id is not None
+
     rows = session.execute(
         select(UserAchievement, AchievementTemplate, User)
         .join(AchievementTemplate, UserAchievement.achievement_id == AchievementTemplate.id)
@@ -286,13 +364,13 @@ def get_recent_achievements(
         "recent": [
             {
                 "user_id": str(ua.user_id),
-                "user_name": u.discord_name,
-                "avatar_url": _avatar_url(u.id, u.discord_avatar_hash),
+                "user_name": u.discord_name if is_authenticated else "Anonymous Member",
+                "avatar_url": _avatar_url(
+                    u.id, u.discord_avatar_hash if is_authenticated else None
+                ),
                 "achievement_name": t.name,
                 "achievement_rarity": (
-                    rarities[t.rarity_id].name
-                    if t.rarity_id and t.rarity_id in rarities
-                    else None
+                    rarities[t.rarity_id].name if t.rarity_id and t.rarity_id in rarities else None
                 ),
                 "rarity_color": (
                     rarities[t.rarity_id].color
@@ -323,9 +401,7 @@ def get_public_settings(session: Session = Depends(get_session)):
         "economy.primary_currency_name",
         "economy.secondary_currency_name",
     ]
-    rows = session.scalars(
-        select(Setting).where(Setting.key.in_(public_keys))
-    ).all()
+    rows = session.scalars(select(Setting).where(Setting.key.in_(public_keys))).all()
 
     result = {}
     for r in rows:

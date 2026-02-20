@@ -15,11 +15,11 @@ community_motto: "Bridge the gap between chat and code."
 bot_prefix: "!"                  # Prefix for legacy text commands
 guild_id: 1468816181854081229    # Your Discord server ID (snowflake)
 
-# --- Dashboard --------------------------------------------------------------
-dashboard_port: 3000              # Port for the SvelteKit dashboard
-
 # --- Admin ------------------------------------------------------------------
 admin_role_id: 1469180780914671803                  # Discord role ID required for admin access
+admin_rate_limit: 30             # Max admin mutations per rate-limit window
+admin_rate_window: 60            # Rate-limit window in seconds
 
 # --- Optional ---------------------------------------------------------------
 announce_channel_id:              # Channel ID for level-up / achievement posts (null = same channel)
+dashboard_url:                    # Public URL of the dashboard, e.g. https://synapse.yourdomain.com

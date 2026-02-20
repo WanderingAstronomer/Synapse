@@ -5,6 +5,7 @@ synapse.api.auth — Discord OAuth2 + JWT issuance
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import secrets
@@ -21,12 +22,12 @@ from synapse.api.deps import (
     JWT_ALGORITHM,
     JWT_SECRET,
     get_config,
-    get_current_admin,
     get_engine,
+    get_member_context,
 )
 from synapse.config import SynapseConfig
 from synapse.database.engine import get_session, run_db
-from synapse.database.models import OAuthState
+from synapse.database.models import OAuthState, Setting
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -54,13 +55,11 @@ def _oauth_env() -> tuple[str, str, str, str]:
     if missing:
         raise HTTPException(
             status_code=500,
-            detail=(
-                "Discord OAuth is not configured: missing "
-                + ", ".join(missing)
-            ),
+            detail=("Discord OAuth is not configured: missing " + ", ".join(missing)),
         )
 
     return client_id, client_secret, redirect_uri, frontend_url
+
 
 OAUTH_STATE_TTL_SECONDS = 600
 
@@ -83,6 +82,23 @@ def _consume_oauth_state(engine, state: str) -> bool:
             return False
         session.delete(row)
         return True
+
+
+def _read_bool_setting(engine, key: str, default: bool = False) -> bool:
+    """Read a boolean flag from the ``settings`` table.
+
+    Used for flag checks inside async route handlers via
+    ``await run_db(_read_bool_setting, engine, key)``.
+    Returns *default* when the key is absent or the value cannot be parsed.
+    """
+    with get_session(engine) as session:
+        row = session.get(Setting, key)
+        if row is None:
+            return default
+        try:
+            return bool(json.loads(row.value_json))
+        except (json.JSONDecodeError, TypeError):
+            return default
 
 
 @router.get("/login")
@@ -155,23 +171,32 @@ async def callback(
 
     user_info = user_resp.json()
 
-    # Check admin role
+    # Resolve membership and admin status
     has_admin = False
-    if member_resp.status_code == 200:
-        member = member_resp.json()
-        role_ids = [int(r) for r in member.get("roles", [])]
-        has_admin = cfg.admin_role_id in role_ids
+    member_roles: list[int] = []
+    is_guild_member = member_resp.status_code == 200
 
-    if not has_admin:
-        # Redirect to frontend with error
+    if is_guild_member:
+        member = member_resp.json()
+        member_roles = [int(r) for r in member.get("roles", [])]
+        has_admin = cfg.admin_role_id in member_roles
+
+    # Always require guild membership
+    if not is_guild_member:
+        return RedirectResponse(f"{frontend_url}?auth_error=not_member")
+
+    # Flag-gated: when three_tier_auth_enabled is false only admins may log in
+    three_tier_enabled = await run_db(_read_bool_setting, engine, "flags.three_tier_auth_enabled")
+    if not three_tier_enabled and not has_admin:
         return RedirectResponse(f"{frontend_url}?auth_error=not_admin")
 
-    # Issue JWT
+    # Issue JWT with full member context
     payload = {
         "sub": user_info["id"],
         "username": user_info.get("username", "Unknown"),
         "avatar": user_info.get("avatar"),
-        "is_admin": True,
+        "is_admin": has_admin,
+        "roles": member_roles,
         "exp": datetime.now(UTC) + timedelta(hours=12),
     }
     token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
@@ -181,11 +206,16 @@ async def callback(
 
 
 @router.get("/me")
-async def me(admin: dict = Depends(get_current_admin)):
-    """Return the current authenticated admin's info."""
+async def me(member: dict = Depends(get_member_context)):
+    """Return the authenticated member's identity.
+
+    Accepts any guild member (Tier 2+), not just admins.
+    The ``is_admin`` flag comes from the JWT payload so the frontend
+    can still gate admin-only UI.
+    """
     return {
-        "id": admin["sub"],
-        "username": admin.get("username", "Unknown"),
-        "avatar": admin.get("avatar"),
-        "is_admin": True,
+        "id": member["sub"],
+        "username": member.get("username", "Unknown"),
+        "avatar": member.get("avatar"),
+        "is_admin": member.get("is_admin", False),
     }

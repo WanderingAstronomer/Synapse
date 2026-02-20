@@ -32,6 +32,7 @@ _lock = threading.Lock()
 
 class LogEntry:
     """One captured log record."""
+
     __slots__ = ("timestamp", "level", "logger", "message")
 
     def __init__(self, timestamp: str, level: str, logger: str, message: str):
@@ -105,9 +106,7 @@ class RingBufferHandler(logging.Handler):
     def emit(self, record: logging.LogRecord) -> None:
         try:
             entry = LogEntry(
-                timestamp=datetime.fromtimestamp(
-                    record.created, tz=UTC
-                ).isoformat(),
+                timestamp=datetime.fromtimestamp(record.created, tz=UTC).isoformat(),
                 level=record.levelname,
                 logger=record.name,
                 message=self.format(record) if self.formatter else record.getMessage(),

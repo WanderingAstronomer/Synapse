@@ -97,11 +97,12 @@
 	</div>
 {:else}
 	<!-- Filters -->
-	<div class="flex flex-wrap gap-2 mb-6">
+	<div class="flex flex-wrap gap-2 mb-6" role="group" aria-label="Achievement filters">
 		<button
 			class="px-3 py-1.5 rounded-lg text-xs font-medium transition-all
 				{!categoryFilter ? 'bg-brand-600 text-white shadow-lg shadow-brand-500/20' : 'bg-surface-200 text-zinc-400 hover:text-zinc-200'}"
 			onclick={() => (categoryFilter = '')}
+			aria-pressed={!categoryFilter}
 		>
 			All Categories
 		</button>
@@ -110,15 +111,17 @@
 				class="px-3 py-1.5 rounded-lg text-xs font-medium transition-all
 					{categoryFilter === cat ? 'bg-brand-600 text-white shadow-lg shadow-brand-500/20' : 'bg-surface-200 text-zinc-400 hover:text-zinc-200'}"
 				onclick={() => (categoryFilter = cat)}
+				aria-pressed={categoryFilter === cat}
 			>
 				{CATEGORY_ICONS[cat] ?? ''} {capitalize(cat)}
 			</button>
 		{/each}
-		<div class="w-px bg-surface-400 mx-1"></div>
+		<div class="w-px bg-surface-400 mx-1" role="separator"></div>
 		<button
 			class="px-3 py-1.5 rounded-lg text-xs font-medium transition-all
 				{!rarityFilter ? 'bg-brand-600 text-white shadow-lg shadow-brand-500/20' : 'bg-surface-200 text-zinc-400 hover:text-zinc-200'}"
 			onclick={() => (rarityFilter = '')}
+			aria-pressed={!rarityFilter}
 		>
 			All Rarities
 		</button>
@@ -127,6 +130,7 @@
 				class="px-3 py-1.5 rounded-lg text-xs font-medium transition-all
 					{rarityFilter === rar ? 'bg-brand-600 text-white shadow-lg shadow-brand-500/20' : 'bg-surface-200 text-zinc-400 hover:text-zinc-200'}"
 				onclick={() => (rarityFilter = rar)}
+				aria-pressed={rarityFilter === rar}
 			>
 				{capitalize(rar)}
 			</button>

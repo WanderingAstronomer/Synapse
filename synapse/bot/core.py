@@ -35,10 +35,14 @@ from synapse.config import SynapseConfig
 from synapse.database.engine import run_db
 from synapse.engine.cache import ConfigCache
 from synapse.engine.events import SynapseEvent
+from synapse.services.achievement_seeder import seed_default_season, seed_default_taxonomy
 from synapse.services.announcement_service import start_queue, stop_queue
 from synapse.services.channel_service import sync_channels_from_snapshot
 from synapse.services.event_lake_writer import EventLakeWriter
+from synapse.services.media_service import seed_svg_overlays
+from synapse.services.projection_service import start_projection_worker, stop_projection_worker
 from synapse.services.reward_service import process_event
+from synapse.services.rules_seeder import seed_default_rules
 from synapse.services.setup_service import (
     ChannelInfo,
     GuildSnapshot,
@@ -57,6 +61,8 @@ EXTENSIONS: list[str] = [
     "synapse.bot.cogs.meta",
     "synapse.bot.cogs.admin",
     "synapse.bot.cogs.tasks",
+    "synapse.bot.cogs.polls",
+    "synapse.bot.cogs.marketplace",
 ]
 
 # Name of the auto-created achievements channel
@@ -84,9 +90,9 @@ class SynapseBot(commands.Bot):
         # Explicitly disabled:
         #   GUILD_PRESENCES — bandwidth bomb, no engagement value
         intents = discord.Intents.default()
-        intents.message_content = True    # Privileged: quality analysis
-        intents.members = True            # Privileged: join/leave tracking
-        intents.presences = False         # Explicitly disabled: too expensive
+        intents.message_content = True  # Privileged: quality analysis
+        intents.members = True  # Privileged: join/leave tracking
+        intents.presences = False  # Explicitly disabled: too expensive
 
         super().__init__(
             command_prefix=cfg.bot_prefix,
@@ -126,6 +132,44 @@ class SynapseBot(commands.Bot):
             except Exception as exc:
                 logger.error("Failed to load extension %s: %s", ext, exc)
 
+        # Seed default reward rules (idempotent — safe to call every restart)
+        try:
+            await run_db(seed_default_rules, self.engine, self.cfg.guild_id)
+            logger.info("Default reward rules seeded for guild %s", self.cfg.guild_id)
+        except Exception as exc:
+            logger.error("Failed to seed default reward rules: %s", exc)
+
+        # Seed default SVG overlays (idempotent — safe to call every restart)
+        try:
+            created = await run_db(seed_svg_overlays, self.engine, self.cfg.guild_id)
+            if created:
+                logger.info(
+                    "Seeded %d default SVG overlays for guild %s", created, self.cfg.guild_id
+                )
+        except Exception as exc:
+            logger.error("Failed to seed default SVG overlays: %s", exc)
+
+        # Seed default achievement taxonomy (idempotent — safe to call every restart)
+        try:
+            counts = await run_db(seed_default_taxonomy, self.engine, self.cfg.guild_id)
+            if counts["rarities"] or counts["categories"]:
+                logger.info(
+                    "Seeded %d rarities and %d categories for guild %s",
+                    counts["rarities"],
+                    counts["categories"],
+                    self.cfg.guild_id,
+                )
+        except Exception as exc:
+            logger.error("Failed to seed achievement taxonomy: %s", exc)
+
+        # Seed Founding Season if no seasons exist yet (idempotent)
+        try:
+            created_season = await run_db(seed_default_season, self.engine, self.cfg.guild_id)
+            if created_season:
+                logger.info("Seeded Founding Season for guild %s", self.cfg.guild_id)
+        except Exception as exc:
+            logger.error("Failed to seed default season: %s", exc)
+
     async def on_ready(self) -> None:
         """Fired when the bot has connected and the cache is populated."""
         assert self.user is not None  # guaranteed after on_ready
@@ -158,6 +202,10 @@ class SynapseBot(commands.Bot):
         start_queue(asyncio.get_running_loop())
         logger.info("Announcement throttle drain task started.")
 
+        # --- Start projection worker (gated by flags.projection_workers_enabled) ---
+        start_projection_worker(self.engine, self.cache, self.cfg.guild_id)
+        logger.info("Projection worker started (flag-gated).")
+
         # --- Register event callbacks for cross-service notifications -------
         await self._register_event_callbacks()
 
@@ -166,6 +214,7 @@ class SynapseBot(commands.Bot):
         logger.info("Bot shutting down…")
         self.cache.stop_listener()  # Graceful PG LISTEN thread exit (TD-005)
         stop_queue()
+        await stop_projection_worker()
         await super().close()
 
     # -----------------------------------------------------------------------
@@ -175,7 +224,9 @@ class SynapseBot(commands.Bot):
         """Register async callbacks for events arriving via PG NOTIFY."""
         loop = asyncio.get_running_loop()
         self.cache.register_event_callback(
-            "achievement_granted", self._on_achievement_granted, loop=loop,
+            "achievement_granted",
+            self._on_achievement_granted,
+            loop=loop,
         )
         logger.info("Event callbacks registered on asyncio loop")
 
@@ -184,6 +235,7 @@ class SynapseBot(commands.Bot):
 
         Fires the same rich announcement used by the bot /grant command.
         """
+        logger.info("Received achievement_granted event: %s", data)
         from synapse.services.announcement_service import announce_achievement_grant
 
         recipient_id = int(data["recipient_id"])
@@ -216,7 +268,9 @@ class SynapseBot(commands.Bot):
         """Create #synapse-achievements in the primary guild if it doesn't exist."""
         guild = self.get_guild(self.cfg.guild_id)
         if guild is None:
-            logger.warning("Primary guild %d not found — skipping achievements channel", self.cfg.guild_id)
+            logger.warning(
+                "Primary guild %d not found — skipping achievements channel", self.cfg.guild_id
+            )  # noqa: E501
             return
 
         # Check if channel already exists
@@ -225,7 +279,8 @@ class SynapseBot(commands.Bot):
                 self.synapse_announce_channel_id = ch.id
                 logger.info(
                     "Found existing #%s channel (ID: %d)",
-                    ACHIEVEMENTS_CHANNEL_NAME, ch.id,
+                    ACHIEVEMENTS_CHANNEL_NAME,
+                    ch.id,
                 )
                 return
 
@@ -242,18 +297,22 @@ class SynapseBot(commands.Bot):
             self.synapse_announce_channel_id = new_ch.id
             logger.info(
                 "Created #%s channel (ID: %d) in guild %s",
-                ACHIEVEMENTS_CHANNEL_NAME, new_ch.id, guild.name,
+                ACHIEVEMENTS_CHANNEL_NAME,
+                new_ch.id,
+                guild.name,
             )
         except discord.Forbidden:
             logger.warning(
                 "Missing permissions to create #%s in guild %s — "
                 "achievement announcements will use fallback channels.",
-                ACHIEVEMENTS_CHANNEL_NAME, guild.name,
+                ACHIEVEMENTS_CHANNEL_NAME,
+                guild.name,
             )
         except Exception:
             logger.exception(
                 "Failed to create #%s in guild %s",
-                ACHIEVEMENTS_CHANNEL_NAME, guild.name,
+                ACHIEVEMENTS_CHANNEL_NAME,
+                guild.name,
             )
 
     # -----------------------------------------------------------------------
@@ -279,8 +338,7 @@ class SynapseBot(commands.Bot):
 
         # Categories first (no parent category)
         channel_infos: list[ChannelInfo] = [
-            ChannelInfo(id=c.id, name=c.name, type="category")
-            for c in guild.categories
+            ChannelInfo(id=c.id, name=c.name, type="category") for c in guild.categories
         ]
 
         # All other channel types share the same shape
@@ -292,13 +350,15 @@ class SynapseBot(commands.Bot):
         ]
         for attr, ch_type in _channel_sources:
             for ch in getattr(guild, attr, []):
-                channel_infos.append(ChannelInfo(
-                    id=ch.id,
-                    name=ch.name,
-                    type=ch_type,
-                    category_id=ch.category.id if ch.category else None,
-                    category_name=ch.category.name if ch.category else None,
-                ))
+                channel_infos.append(
+                    ChannelInfo(
+                        id=ch.id,
+                        name=ch.name,
+                        type=ch_type,
+                        category_id=ch.category.id if ch.category else None,
+                        category_name=ch.category.name if ch.category else None,
+                    )
+                )
 
         snapshot = GuildSnapshot(
             guild_id=guild.id,
@@ -333,9 +393,15 @@ class SynapseBot(commands.Bot):
             afk_ids.add(guild.afk_channel.id)
             logger.info(
                 "Detected AFK channel: #%s (ID: %d)",
-                guild.afk_channel.name, guild.afk_channel.id,
+                guild.afk_channel.name,
+                guild.afk_channel.id,
             )
-            # TODO: Also load admin-designated non-tracked channels from settings
+
+        # Load admin-designated non-tracked channels from settings
+        ignored = self.cache.get_setting("event_lake.ignored_channels", [])
+        if ignored and isinstance(ignored, list):
+            afk_ids.update(ignored)
+            logger.info("Loaded %d ignored channels from settings", len(ignored))
 
         self.lake_writer.set_afk_channels(afk_ids)
         logger.info("Event Lake AFK channel set: %s", afk_ids or "(none)")
@@ -371,7 +437,9 @@ class SynapseBot(commands.Bot):
 
         logger.info(
             "Permission audit: %d readable text channels, %d blocked in guild %s",
-            len(readable), len(blocked), guild.id,
+            len(readable),
+            len(blocked),
+            guild.id,
         )
         if readable:
             logger.debug("Readable text channels: %s", ", ".join(readable))

@@ -173,11 +173,8 @@ def delete_card(
     session: Session = Depends(get_session),
 ):
     """Remove a card from its page layout."""
-    deleted = layout_service.delete_card(
-        session, card_id, actor_id=int(admin["sub"])
-    )
+    deleted = layout_service.delete_card(session, card_id, actor_id=int(admin["sub"]))
     if not deleted:
         raise HTTPException(404, f"Card not found: {card_id}")
     session.commit()
     return {"deleted": True}
-

@@ -26,7 +26,6 @@ from synapse.services.log_buffer import (
     set_capture_level,
 )
 from synapse.services.setup_service import (
-    GuildSnapshot,
     bootstrap_guild,
     get_setup_status,
 )
@@ -103,16 +102,11 @@ def get_audit_log(
     session: Session = Depends(get_session),
 ):
     """Paginated admin audit log."""
-    total = session.scalar(
-        select(func.count()).select_from(AdminLog)
-    ) or 0
+    total = session.scalar(select(func.count()).select_from(AdminLog)) or 0
     offset = (page - 1) * page_size
 
     rows = session.scalars(
-        select(AdminLog)
-        .order_by(AdminLog.timestamp.desc())
-        .offset(offset)
-        .limit(page_size)
+        select(AdminLog).order_by(AdminLog.timestamp.desc()).offset(offset).limit(page_size)
     ).all()
 
     return {
@@ -166,10 +160,13 @@ def run_bootstrap(
         allow_guild_mismatch=allow_guild_mismatch,
     )
     if not result.success:
-        raise HTTPException(400, detail={
-            "message": "Bootstrap failed",
-            "warnings": result.warnings,
-        })
+        raise HTTPException(
+            400,
+            detail={
+                "message": "Bootstrap failed",
+                "warnings": result.warnings,
+            },
+        )
     return {
         "success": True,
         "channels_synced": result.channels_synced,
@@ -239,9 +236,7 @@ def resolve_names(
             except (ValueError, TypeError):
                 pass
         if int_ids:
-            rows = session.scalars(
-                select(User).where(User.id.in_(int_ids))
-            ).all()
+            rows = session.scalars(select(User).where(User.id.in_(int_ids))).all()
             for u in rows:
                 result["users"][str(u.id)] = u.discord_name
 
@@ -254,9 +249,7 @@ def resolve_names(
             except (ValueError, TypeError):
                 pass
         if int_ch_ids:
-            ch_rows = session.scalars(
-                select(Channel).where(Channel.id.in_(int_ch_ids))
-            ).all()
+            ch_rows = session.scalars(select(Channel).where(Channel.id.in_(int_ch_ids))).all()
             for ch in ch_rows:
                 result["channels"][str(ch.id)] = ch.name
 

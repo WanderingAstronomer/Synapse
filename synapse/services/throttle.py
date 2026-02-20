@@ -44,9 +44,7 @@ class AnnouncementThrottle:
         self._timestamps[channel_id].append(now)
         return True
 
-    def enqueue(
-        self, channel_id: int, embed: discord.Embed, channel: Messageable
-    ) -> None:
+    def enqueue(self, channel_id: int, embed: discord.Embed, channel: Messageable) -> None:
         """Put an embed on the overflow queue for later delivery."""
         if channel_id not in self._queues:
             self._queues[channel_id] = asyncio.Queue()
@@ -62,9 +60,7 @@ class AnnouncementThrottle:
                 try:
                     await channel.send(embed=embed)
                 except Exception:
-                    logger.exception(
-                        "Failed to send queued embed to channel %d", ch_id
-                    )
+                    logger.exception("Failed to send queued embed to channel %d", ch_id)
 
     def start(self, loop: asyncio.AbstractEventLoop) -> None:
         """Start the background drain task."""
@@ -79,9 +75,7 @@ class AnnouncementThrottle:
                 except Exception:
                     logger.exception("Throttle drain error")
 
-        self._drain_task = loop.create_task(
-            _drain_loop(), name="announce-drain"
-        )
+        self._drain_task = loop.create_task(_drain_loop(), name="announce-drain")
 
     def stop(self) -> None:
         """Cancel the drain task."""

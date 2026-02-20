@@ -31,42 +31,77 @@ DEFAULT_PAGES: list[dict[str, Any]] = [
         "page_slug": "dashboard",
         "display_name": "Dashboard",
         "cards": [
-            {"card_type": "hero_banner", "position": 0, "grid_span": 3,
-             "title": "Welcome", "subtitle": "Community Dashboard"},
-            {"card_type": "metric", "position": 1, "grid_span": 1,
-             "title": "Total Members", "config_json": {"metric_key": "total_members"}},
-            {"card_type": "metric", "position": 2, "grid_span": 1,
-             "title": "Total XP", "config_json": {"metric_key": "total_xp"}},
-            {"card_type": "metric", "position": 3, "grid_span": 1,
-             "title": "Total Gold", "config_json": {"metric_key": "total_gold"}},
-            {"card_type": "top_members", "position": 4, "grid_span": 2,
-             "title": "Top Members"},
-            {"card_type": "recent_achievements", "position": 5, "grid_span": 1,
-             "title": "Recent Achievements"},
+            {
+                "card_type": "hero_banner",
+                "position": 0,
+                "grid_span": 3,
+                "title": "Welcome",
+                "subtitle": "Community Dashboard",
+            },
+            {
+                "card_type": "metric",
+                "position": 1,
+                "grid_span": 1,
+                "title": "Total Members",
+                "config_json": {"metric_key": "total_members"},
+            },
+            {
+                "card_type": "metric",
+                "position": 2,
+                "grid_span": 1,
+                "title": "Total XP",
+                "config_json": {"metric_key": "total_xp"},
+            },
+            {
+                "card_type": "metric",
+                "position": 3,
+                "grid_span": 1,
+                "title": "Total Gold",
+                "config_json": {"metric_key": "total_gold"},
+            },
+            {"card_type": "top_members", "position": 4, "grid_span": 2, "title": "Top Members"},
+            {
+                "card_type": "recent_achievements",
+                "position": 5,
+                "grid_span": 1,
+                "title": "Recent Achievements",
+            },
         ],
     },
     {
         "page_slug": "leaderboard",
         "display_name": "Leaderboard",
         "cards": [
-            {"card_type": "leaderboard_table", "position": 0, "grid_span": 3,
-             "title": "Leaderboard"},
+            {
+                "card_type": "leaderboard_table",
+                "position": 0,
+                "grid_span": 3,
+                "title": "Leaderboard",
+            },
         ],
     },
     {
         "page_slug": "activity",
         "display_name": "Activity",
         "cards": [
-            {"card_type": "activity_feed", "position": 0, "grid_span": 3,
-             "title": "Recent Activity"},
+            {
+                "card_type": "activity_feed",
+                "position": 0,
+                "grid_span": 3,
+                "title": "Recent Activity",
+            },
         ],
     },
     {
         "page_slug": "achievements",
         "display_name": "Achievements",
         "cards": [
-            {"card_type": "achievement_grid", "position": 0, "grid_span": 3,
-             "title": "Achievements"},
+            {
+                "card_type": "achievement_grid",
+                "position": 0,
+                "grid_span": 3,
+                "title": "Achievements",
+            },
         ],
     },
 ]
@@ -82,9 +117,11 @@ def seed_default_layouts(session: Session, guild_id: int) -> None:
     NOT called lazily on GET — if layouts are missing after setup,
     that is a real error.
     """
-    existing = session.execute(
-        select(PageLayout.page_slug).where(PageLayout.guild_id == guild_id)
-    ).scalars().all()
+    existing = (
+        session.execute(select(PageLayout.page_slug).where(PageLayout.guild_id == guild_id))
+        .scalars()
+        .all()
+    )
     existing_slugs = set(existing)
 
     for page_def in DEFAULT_PAGES:
@@ -118,11 +155,15 @@ def seed_default_layouts(session: Session, guild_id: int) -> None:
 # ---------------------------------------------------------------------------
 def get_layout(session: Session, guild_id: int, page_slug: str) -> dict[str, Any] | None:
     """Get a page layout with its cards."""
-    layout = session.execute(
-        select(PageLayout)
-        .options(joinedload(PageLayout.cards))
-        .where(PageLayout.guild_id == guild_id, PageLayout.page_slug == page_slug)
-    ).unique().scalar_one_or_none()
+    layout = (
+        session.execute(
+            select(PageLayout)
+            .options(joinedload(PageLayout.cards))
+            .where(PageLayout.guild_id == guild_id, PageLayout.page_slug == page_slug)
+        )
+        .unique()
+        .scalar_one_or_none()
+    )
 
     if not layout:
         return None
@@ -132,12 +173,17 @@ def get_layout(session: Session, guild_id: int, page_slug: str) -> dict[str, Any
 
 def get_all_layouts(session: Session, guild_id: int) -> list[dict[str, Any]]:
     """Get all page layouts for a guild."""
-    layouts = session.execute(
-        select(PageLayout)
-        .options(joinedload(PageLayout.cards))
-        .where(PageLayout.guild_id == guild_id)
-        .order_by(PageLayout.page_slug)
-    ).unique().scalars().all()
+    layouts = (
+        session.execute(
+            select(PageLayout)
+            .options(joinedload(PageLayout.cards))
+            .where(PageLayout.guild_id == guild_id)
+            .order_by(PageLayout.page_slug)
+        )
+        .unique()
+        .scalars()
+        .all()
+    )
 
     return [_layout_to_dict(layout) for layout in layouts]
 
@@ -153,11 +199,15 @@ def save_layout(
     actor_id: int | None = None,
 ) -> dict[str, Any]:
     """Update a page layout.  Optionally reorders cards by ``card_order`` IDs."""
-    layout = session.execute(
-        select(PageLayout)
-        .options(joinedload(PageLayout.cards))
-        .where(PageLayout.guild_id == guild_id, PageLayout.page_slug == page_slug)
-    ).unique().scalar_one_or_none()
+    layout = (
+        session.execute(
+            select(PageLayout)
+            .options(joinedload(PageLayout.cards))
+            .where(PageLayout.guild_id == guild_id, PageLayout.page_slug == page_slug)
+        )
+        .unique()
+        .scalar_one_or_none()
+    )
 
     if not layout:
         raise ValueError(f"Layout not found: {page_slug}")
@@ -182,14 +232,16 @@ def save_layout(
 
     after = _layout_to_dict(layout)
     if actor_id and before != after:
-        session.add(AdminLog(
-            actor_id=actor_id,
-            action_type="UPDATE",
-            target_table="page_layouts",
-            target_id=layout.id,
-            before_snapshot=before,
-            after_snapshot=after,
-        ))
+        session.add(
+            AdminLog(
+                actor_id=actor_id,
+                action_type="UPDATE",
+                target_table="page_layouts",
+                target_id=layout.id,
+                before_snapshot=before,
+                after_snapshot=after,
+            )
+        )
 
     return after
 
@@ -225,13 +277,15 @@ def create_card(
 
     result = _card_to_dict(card)
     if actor_id:
-        session.add(AdminLog(
-            actor_id=actor_id,
-            action_type="CREATE",
-            target_table="card_configs",
-            target_id=card.id,
-            after_snapshot=result,
-        ))
+        session.add(
+            AdminLog(
+                actor_id=actor_id,
+                action_type="CREATE",
+                target_table="card_configs",
+                target_id=card.id,
+                after_snapshot=result,
+            )
+        )
 
     return result
 
@@ -259,14 +313,16 @@ def update_card(
 
     after = _card_to_dict(card)
     if actor_id and before != after:
-        session.add(AdminLog(
-            actor_id=actor_id,
-            action_type="UPDATE",
-            target_table="card_configs",
-            target_id=card.id,
-            before_snapshot=before,
-            after_snapshot=after,
-        ))
+        session.add(
+            AdminLog(
+                actor_id=actor_id,
+                action_type="UPDATE",
+                target_table="card_configs",
+                target_id=card.id,
+                before_snapshot=before,
+                after_snapshot=after,
+            )
+        )
 
     return after
 
@@ -287,13 +343,15 @@ def delete_card(
     session.flush()
 
     if actor_id:
-        session.add(AdminLog(
-            actor_id=actor_id,
-            action_type="DELETE",
-            target_table="card_configs",
-            target_id=card_id,
-            before_snapshot=snapshot,
-        ))
+        session.add(
+            AdminLog(
+                actor_id=actor_id,
+                action_type="DELETE",
+                target_table="card_configs",
+                target_id=card_id,
+                before_snapshot=snapshot,
+            )
+        )
 
     return True
 

@@ -10,14 +10,15 @@ has historical data from day one.
 UPSERT query, which is not available in SQLite. Production deployments use
 PostgreSQL; integration tests run in dry-run mode to validate schema correctness.
 
-Mapping from legacy ``activity_log.event_type`` to Event Lake types:
-    MESSAGE          → message_create
-    REACTION_GIVEN   → reaction_add
-    REACTION_RECEIVED→ (skipped — no equivalent Event Lake type)
-    THREAD_CREATE    → thread_create
-    VOICE_TICK       → voice_join  (approximation — each tick ~ one session)
-    MANUAL_AWARD     → (skipped — not a natural event)
-    ACHIEVEMENT_EARNED → (skipped — not a natural event)
+Mapping from legacy ``activity_log.event_type`` (InteractionType values) to
+Event Lake types (EventType values):
+    InteractionType.MESSAGE          → EventType.MESSAGE_CREATE
+    InteractionType.REACTION_GIVEN   → EventType.REACTION_ADD
+    InteractionType.REACTION_RECEIVED→ (skipped — no equivalent Event Lake type)
+    InteractionType.THREAD_CREATE    → EventType.THREAD_CREATE
+    InteractionType.VOICE_TICK       → EventType.VOICE_JOIN  (approximation)
+    InteractionType.MANUAL_AWARD     → (skipped — not a natural event)
+    InteractionType.ACHIEVEMENT_EARNED → (skipped — not a natural event)
 
 Only the ``lifetime`` period is backfilled; daily and season counters
 are left to accumulate organically.
@@ -31,16 +32,19 @@ from datetime import UTC, datetime
 from sqlalchemy import Engine, func, select, text
 
 from synapse.database.engine import get_session
-from synapse.database.models import ActivityLog
+from synapse.database.models import ActivityLog, InteractionType
+from synapse.engine.events import EventType
 
 logger = logging.getLogger(__name__)
 
-# Map legacy event_types to Event Lake event_types
+# Map legacy activity_log event_types to canonical Event Lake EventType values.
+# Keys use InteractionType string values; values use EventType string values so
+# both sides are enum-checked and rename-safe.
 LEGACY_TYPE_MAP: dict[str, str] = {
-    "MESSAGE": "message_create",
-    "REACTION_GIVEN": "reaction_add",
-    "THREAD_CREATE": "thread_create",
-    "VOICE_TICK": "voice_join",
+    InteractionType.MESSAGE: EventType.MESSAGE_CREATE,
+    InteractionType.REACTION_GIVEN: EventType.REACTION_ADD,
+    InteractionType.THREAD_CREATE: EventType.THREAD_CREATE,
+    InteractionType.VOICE_TICK: EventType.VOICE_JOIN,
 }
 
 
@@ -64,14 +68,11 @@ def backfill_counters_from_activity_log(
 
     with get_session(engine) as session:
         # Aggregate legacy events: COUNT per (user_id, event_type)
-        q = (
-            select(
-                ActivityLog.user_id,
-                ActivityLog.event_type,
-                func.count().label("cnt"),
-            )
-            .group_by(ActivityLog.user_id, ActivityLog.event_type)
-        )
+        q = select(
+            ActivityLog.user_id,
+            ActivityLog.event_type,
+            func.count().label("cnt"),
+        ).group_by(ActivityLog.user_id, ActivityLog.event_type)
         results = session.execute(q).all()
 
         for row in results:
@@ -99,9 +100,11 @@ def backfill_counters_from_activity_log(
 
     action = "would upsert" if dry_run else "upserted"
     logger.info(
-        "Backfill: %s %d counters from %d activity_log aggregates "
-        "(skipped types: %s)",
-        action, upserted, rows_read, sorted(skipped_types),
+        "Backfill: %s %d counters from %d activity_log aggregates (skipped types: %s)",
+        action,
+        upserted,
+        rows_read,
+        sorted(skipped_types),
     )
 
     return {

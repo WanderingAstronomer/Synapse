@@ -31,7 +31,8 @@ logger = logging.getLogger(__name__)
 
 
 # Maximum voice star ticks per user per hour (prevents idle farming)
-MAX_VOICE_TICKS_PER_HOUR = 6
+# Now configurable via voice_ticks_per_hour in config.yaml
+# MAX_VOICE_TICKS_PER_HOUR = 6
 
 
 class Voice(commands.Cog, name="Voice"):
@@ -47,24 +48,96 @@ class Voice(commands.Cog, name="Voice"):
         self._current_tick_minutes: int = 10
 
     async def cog_load(self) -> None:
-        """Start the voice tick loop when the cog is loaded."""
+        await self._restore_state()
         self.voice_tick_loop.start()
 
     async def cog_unload(self) -> None:
         """Stop the voice tick loop when the cog is unloaded."""
         self.voice_tick_loop.cancel()
+        await self._save_state()
+
+    async def _save_state(self) -> None:
+        """Persist active voice sessions and tick logs to DB."""
+        if not self._voice_sessions and not self._voice_tick_log:
+            return
+
+        state = {
+            "sessions": self._voice_sessions,
+            "tick_log": self._voice_tick_log,
+        }
+
+        def _sync_save(engine, data):
+            import json
+
+            from sqlalchemy.orm import Session
+
+            from synapse.database.models import Setting
+
+            with Session(engine) as session:
+                session.merge(
+                    Setting(
+                        key="internal.voice_state",
+                        value_json=json.dumps(data),
+                        category="internal",
+                        description="Persisted voice session state",
+                    )
+                )
+                session.commit()
+
+        try:
+            await run_db(_sync_save, self.bot.engine, state)
+            logger.info("Persisted voice state (%d sessions)", len(self._voice_sessions))
+        except Exception:
+            logger.exception("Failed to persist voice state")
+
+    async def _restore_state(self) -> None:
+        """Restore voice state from DB."""
+
+        def _sync_load(engine):
+            import json
+
+            from sqlalchemy.orm import Session
+
+            from synapse.database.models import Setting
+
+            with Session(engine) as session:
+                setting = session.get(Setting, "internal.voice_state")
+                return json.loads(setting.value_json) if setting else None
+
+        try:
+            data = await run_db(_sync_load, self.bot.engine)
+            if data:
+                # JSON keys are always strings, convert back to int user_ids
+                self._voice_sessions = {int(k): v for k, v in data.get("sessions", {}).items()}
+                self._voice_tick_log = {int(k): v for k, v in data.get("tick_log", {}).items()}
+                logger.info("Restored voice state (%d sessions)", len(self._voice_sessions))
+        except Exception:
+            logger.exception("Failed to restore voice state")
 
     def _is_voice_tick_capped(self, user_id: int) -> bool:
-        """Check if user has hit the hourly voice tick cap."""
+        """Check if user has hit the hourly voice tick cap.
+
+        Uses the configured `voice_ticks_per_hour` (falls back to 6).
+        """
         now = time.time()
         cutoff = now - 3600  # 1 hour
         ticks = self._voice_tick_log.get(user_id, [])
         # Prune old entries
         ticks = [t for t in ticks if t > cutoff]
         self._voice_tick_log[user_id] = ticks
-        if len(ticks) >= MAX_VOICE_TICKS_PER_HOUR:
-            return True
-        return False
+
+        # Determine configured cap (cfg -> cache -> default)
+        cap = None
+        if hasattr(self.bot, "cfg"):
+            cap = getattr(self.bot.cfg, "voice_ticks_per_hour", None)
+        if cap is None:
+            cap = self.bot.cache.get_int("voice_ticks_per_hour", 6)
+        try:
+            cap = int(cap)
+        except Exception:
+            cap = 6
+
+        return len(ticks) >= cap
 
     def _record_voice_tick(self, user_id: int) -> None:
         """Record a voice tick for hourly cap tracking."""
@@ -84,13 +157,17 @@ class Voice(commands.Cog, name="Voice"):
         after_ch = getattr(after.channel, "name", "None")
         logger.debug(
             "Gateway event: VOICE_STATE %s (%s → %s, bot=%s)",
-            member.name, before_ch, after_ch, member.bot,
+            member.name,
+            before_ch,
+            after_ch,
+            member.bot,
         )
         try:
             await self._handle_voice_update(member, before, after)
         except Exception:
             logger.exception(
-                "Error processing voice state update for user %s", member.id,
+                "Error processing voice state update for user %s",
+                member.id,
                 extra={"event_type": "voice_state", "user_id": member.id},
             )
 
@@ -146,9 +223,7 @@ class Voice(commands.Cog, name="Voice"):
             and after.channel is not None
             and before.channel != after.channel
         ):
-            self._voice_sessions[member.id] = self._voice_sessions.get(
-                member.id, time.time()
-            )
+            self._voice_sessions[member.id] = self._voice_sessions.get(member.id, time.time())
 
             await run_db(
                 self.bot.lake_writer.write_voice_move,
@@ -165,7 +240,8 @@ class Voice(commands.Cog, name="Voice"):
         # --- Mute/deaf state change (same channel) — update tracker ---
         elif before.channel is not None and after.channel is not None:
             self.bot.lake_writer.voice_tracker.update_state(
-                member.id, guild_id,
+                member.id,
+                guild_id,
                 after.self_mute or False,
                 after.self_deaf or False,
             )

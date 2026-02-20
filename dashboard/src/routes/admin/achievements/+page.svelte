@@ -3,6 +3,7 @@
 	import {
 		api,
 		type AdminAchievement,
+		type AdminUser,
 		type AchievementCategoryItem,
 		type AchievementRarityItem,
 		type AchievementSeriesItem,
@@ -187,6 +188,57 @@
 		} catch (e: any) { flash.error(e.message); }
 	}
 
+	// --- Grant (dispatch test) ---
+	let showGrantModal = $state(false);
+	let grantTarget = $state<AdminAchievement | null>(null);
+	let grantUserId = $state('');
+	let grantDisplayName = $state('');
+	let grantUserQuery = $state('');
+	let grantUserResults = $state<AdminUser[]>([]);
+	let grantSearching = $state(false);
+	let granting = $state(false);
+
+	function openGrant(a: AdminAchievement) {
+		grantTarget = a;
+		grantUserId = '';
+		grantDisplayName = '';
+		grantUserQuery = '';
+		grantUserResults = [];
+		showGrantModal = true;
+	}
+
+	async function searchGrantUsers() {
+		if (grantUserQuery.length < 2) return;
+		grantSearching = true;
+		try {
+			const res = await api.admin.searchUsers(grantUserQuery, 10);
+			grantUserResults = res.users;
+		} catch { /* swallow */ }
+		finally { grantSearching = false; }
+	}
+
+	function selectGrantUser(u: AdminUser) {
+		grantUserId = u.id;
+		grantDisplayName = u.discord_name;
+		grantUserResults = [];
+		grantUserQuery = u.discord_name;
+	}
+
+	async function submitGrant() {
+		if (!grantTarget || !grantUserId) { flash.warning('Select a user'); return; }
+		granting = true;
+		try {
+			await api.admin.grantAchievement({
+				user_id: grantUserId,
+				display_name: grantDisplayName || undefined,
+				achievement_id: grantTarget.id,
+			});
+			flash.success(`Granted "${grantTarget.name}" to ${grantDisplayName || grantUserId}`);
+			showGrantModal = false;
+		} catch (e: any) { flash.error(e.message || 'Grant failed'); }
+		finally { granting = false; }
+	}
+
 	// --- Badge upload ---
 	async function handleBadgeUpload(e: Event) {
 		const input = e.target as HTMLInputElement;
@@ -285,6 +337,7 @@
 		} catch (e: any) { flash.error(e.message); }
 	}
 	async function deleteSer(id: number) {
+		if (!confirm('Delete this series?')) return;
 		try { await api.admin.deleteAchievementSeries(id); const res = await api.admin.getAchievementSeries(); series = res.series; }
 		catch (e: any) { flash.error(e.message); }
 	}
@@ -654,6 +707,7 @@
 						<td class="px-4 py-3 text-right">
 							<div class="flex gap-1 justify-end">
 								<button class="btn-secondary text-xs !px-2 !py-1" onclick={() => startEdit(a)}>Edit</button>
+								<button class="btn-secondary text-xs !px-2 !py-1 text-brand-400" onclick={() => openGrant(a)} title="Grant to user">Grant</button>
 								<button class="text-xs {a.active ? 'btn-danger' : 'btn-secondary'} !px-2 !py-1"
 									onclick={() => toggleActive(a)}>
 									{a.active ? 'Off' : 'On'}
@@ -699,6 +753,57 @@
 		</div>
 		<div class="p-3 border-t border-surface-600 flex justify-end">
 			<button class="btn-secondary text-xs" onclick={() => { showMediaPicker = false; }}>Cancel</button>
+		</div>
+	</div>
+</div>
+{/if}
+
+<!-- Grant Achievement Modal -->
+{#if showGrantModal && grantTarget}
+<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+	role="dialog" aria-modal="true" aria-label="Grant achievement to user">
+	<div class="bg-surface-800 border border-surface-600 rounded-lg shadow-xl w-full max-w-md p-6 space-y-4">
+		<h3 class="text-lg font-semibold text-white">Grant "{grantTarget.name}"</h3>
+		<p class="text-sm text-zinc-400">Search for a user and grant this achievement to them.</p>
+
+		<div class="relative">
+			<label class="label" for="grant-user-query">User</label>
+			<input
+				id="grant-user-query"
+				type="text"
+				class="input w-full"
+				placeholder="Search by name or ID..."
+				bind:value={grantUserQuery}
+				oninput={() => searchGrantUsers()}
+			/>
+			{#if grantUserResults.length > 0}
+				<div class="absolute z-10 mt-1 w-full bg-surface-700 border border-surface-500 rounded shadow-lg max-h-40 overflow-y-auto">
+					{#each grantUserResults as u}
+						<button
+							class="w-full text-left px-3 py-2 text-sm hover:bg-surface-600 text-white"
+							onclick={() => selectGrantUser(u)}
+						>
+							{u.discord_name} <span class="text-zinc-500 text-xs ml-1">({u.id})</span>
+						</button>
+					{/each}
+				</div>
+			{/if}
+			{#if grantSearching}
+				<span class="absolute right-3 top-9 text-xs text-zinc-500">Searching...</span>
+			{/if}
+		</div>
+
+		{#if grantUserId}
+			<div class="text-sm text-green-400">
+				Selected: {grantDisplayName || grantUserId}
+			</div>
+		{/if}
+
+		<div class="flex justify-end gap-3 pt-2">
+			<button class="btn-secondary" onclick={() => showGrantModal = false}>Cancel</button>
+			<button class="btn-primary" onclick={submitGrant} disabled={granting || !grantUserId}>
+				{granting ? 'Granting...' : 'Grant Achievement'}
+			</button>
 		</div>
 	</div>
 </div>

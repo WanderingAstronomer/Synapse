@@ -3,9 +3,9 @@ synapse.bot.cogs.meta — Profile, Leaderboard, & User Commands
 ===============================================================
 
 Hybrid commands for user self-service:
-- /profile — View XP, level, gold, stars, achievements, rank
+- /profile — View XP, level, gold, achievements, rank
 - /link-github — Associate a GitHub account
-- /leaderboard — Top members by XP or stars
+- /leaderboard — Top members by XP
 - /preferences — Toggle DM notifications and visibility
 - /buy-coffee — Spend gold on a fun cosmetic item
 """
@@ -68,9 +68,7 @@ class Meta(commands.Cog, name="Meta"):
                 return {"found": False}
 
             total: int = session.scalar(select(func.count(User.id))) or 0
-            above: int = session.scalar(
-                select(func.count(User.id)).where(User.xp > user.xp)
-            ) or 0
+            above: int = session.scalar(select(func.count(User.id)).where(User.xp > user.xp)) or 0
             rank = above + 1
 
             # Get season stats
@@ -91,14 +89,16 @@ class Meta(commands.Cog, name="Meta"):
             ).all()
 
             # Build rarity lookup for emoji display
-            rarity_map = {
-                r.id: r for r in session.scalars(select(AchievementRarity)).all()
-            }
+            rarity_map = {r.id: r for r in session.scalars(select(AchievementRarity)).all()}
 
-            ach_count = session.scalar(
-                select(func.count(UserAchievement.achievement_id))
-                .where(UserAchievement.user_id == user_id)
-            ) or 0
+            ach_count = (
+                session.scalar(
+                    select(func.count(UserAchievement.achievement_id)).where(
+                        UserAchievement.user_id == user_id
+                    )
+                )
+                or 0
+            )
 
             return {
                 "found": True,
@@ -112,8 +112,6 @@ class Meta(commands.Cog, name="Meta"):
                 "rank": rank,
                 "total": total,
                 "stats": {
-                    "season_stars": stats.season_stars if stats else 0,
-                    "lifetime_stars": stats.lifetime_stars if stats else 0,
                     "messages_sent": stats.messages_sent if stats else 0,
                     "reactions_given": stats.reactions_given if stats else 0,
                     "voice_minutes": stats.voice_minutes if stats else 0,
@@ -140,38 +138,15 @@ class Meta(commands.Cog, name="Meta"):
                 "season_name": season.name if season else "No active season",
             }
 
-    def _get_leaderboard(self, guild_id: int, sort_by: str, limit: int) -> list[dict]:
-        """Get leaderboard data sorted by XP or stars."""
+    def _get_leaderboard(self, limit: int) -> list[dict]:
+        """Get leaderboard data sorted by XP."""
         with get_session(self.bot.engine) as session:
-            if sort_by == "stars":
-                season = session.scalar(
-                    select(Season).where(
-                        Season.guild_id == guild_id, Season.active.is_(True)
-                    )
-                )
-                if not season:
-                    return []
-                rows = session.execute(
-                    select(User.discord_name, UserStats.season_stars, User.level)
-                    .join(UserStats, UserStats.user_id == User.id)
-                    .where(UserStats.season_id == season.id)
-                    .order_by(UserStats.season_stars.desc())
-                    .limit(limit)
-                ).all()
-                return [
-                    {"name": r[0], "value": r[1], "level": r[2]}
-                    for r in rows
-                ]
-            else:
-                rows = session.execute(
-                    select(User.discord_name, User.xp, User.level)
-                    .order_by(User.xp.desc())
-                    .limit(limit)
-                ).all()
-                return [
-                    {"name": r[0], "value": r[1], "level": r[2]}
-                    for r in rows
-                ]
+            rows = session.execute(
+                select(User.discord_name, User.xp, User.level)
+                .order_by(User.xp.desc())
+                .limit(limit)
+            ).all()
+            return [{"name": r[0], "value": r[1], "level": r[2]} for r in rows]
 
     def _toggle_preference(self, user_id: int, field: str, value: bool) -> bool:
         """Toggle a user preference field."""
@@ -266,13 +241,6 @@ class Meta(commands.Cog, name="Meta"):
         embed.add_field(name="Gold", value=f"\U0001fa99 {u['gold']}", inline=True)
         embed.add_field(name="Rank", value=f"#{data['rank']} of {data['total']}", inline=True)
 
-        # Stars
-        embed.add_field(
-            name="\u2b50 Stars",
-            value=f"Season: {stats['season_stars']} | Lifetime: {stats['lifetime_stars']}",
-            inline=True,
-        )
-
         # Stats summary
         stat_text = (
             f"\U0001f4ac {stats['messages_sent']} msgs | "
@@ -283,10 +251,7 @@ class Meta(commands.Cog, name="Meta"):
 
         # Achievements
         if data["achievements"]:
-            ach_lines = [
-                f"{a['emoji']} {a['name']}"
-                for a in data["achievements"][:5]
-            ]
+            ach_lines = [f"{a['emoji']} {a['name']}" for a in data["achievements"][:5]]
             ach_text = "\n".join(ach_lines)
             if data["achievement_count"] > 5:
                 ach_text += f"\n*...and {data['achievement_count'] - 5} more*"
@@ -309,18 +274,12 @@ class Meta(commands.Cog, name="Meta"):
     # -------------------------------------------------------------------
     @commands.hybrid_command(  # type: ignore[arg-type]
         name="leaderboard",
-        description="View the top members by XP or Stars.",
+        description="View the top members by XP.",
     )
-    @app_commands.describe(sort_by="Sort by XP or Stars")
-    @app_commands.choices(sort_by=[
-        app_commands.Choice(name="XP", value="xp"),
-        app_commands.Choice(name="Stars", value="stars"),
-    ])
-    async def leaderboard(self, ctx: commands.Context, sort_by: str = "xp") -> None:
-        guild_id = ctx.guild.id if ctx.guild else 0
+    async def leaderboard(self, ctx: commands.Context) -> None:
         limit = self.bot.cache.get_int("leaderboard_size", 25)
 
-        rows = await run_db(self._get_leaderboard, guild_id, sort_by, limit)
+        rows = await run_db(self._get_leaderboard, limit)
 
         if not rows:
             await ctx.send(
@@ -329,10 +288,10 @@ class Meta(commands.Cog, name="Meta"):
             )
             return
 
-        label = "XP" if sort_by == "xp" else "\u2b50 Stars"
+        label = "XP"
         lines = []
         for i, r in enumerate(rows, 1):
-            medal = RANK_BADGES[i-1] if 0 < i <= len(RANK_BADGES) else f"**{i}.**"
+            medal = RANK_BADGES[i - 1] if 0 < i <= len(RANK_BADGES) else f"**{i}.**"
             lines.append(f"{medal} **{r['name']}** — {r['value']:,} {label} (Lv. {r['level']})")
 
         embed = discord.Embed(
@@ -354,11 +313,13 @@ class Meta(commands.Cog, name="Meta"):
         setting="Which preference to toggle",
         enabled="Turn on (True) or off (False)",
     )
-    @app_commands.choices(setting=[
-        app_commands.Choice(name="Announce Level-Ups", value="announce_level_up"),
-        app_commands.Choice(name="Announce Achievements", value="announce_achievements"),
-        app_commands.Choice(name="Announce Awards", value="announce_awards"),
-    ])
+    @app_commands.choices(
+        setting=[
+            app_commands.Choice(name="Announce Level-Ups", value="announce_level_up"),
+            app_commands.Choice(name="Announce Achievements", value="announce_achievements"),
+            app_commands.Choice(name="Announce Awards", value="announce_awards"),
+        ]
+    )
     async def preferences(self, ctx: commands.Context, setting: str, enabled: bool) -> None:
         valid_fields = {"announce_level_up", "announce_achievements", "announce_awards"}
         if setting not in valid_fields:
@@ -368,6 +329,33 @@ class Meta(commands.Cog, name="Meta"):
         status = "\u2705 Enabled" if value else "\u274c Disabled"
         pretty_name = setting.replace("_", " ").title()
         await ctx.send(f"**{pretty_name}**: {status}", ephemeral=True)
+
+    # -------------------------------------------------------------------
+    # /dashboard
+    # -------------------------------------------------------------------
+    @commands.hybrid_command(  # type: ignore[arg-type]
+        name="dashboard",
+        description="Get a link to the Synapse community dashboard.",
+    )
+    async def dashboard(self, ctx: commands.Context) -> None:  # noqa: A003
+        url = self.bot.cfg.dashboard_url
+        if not url:
+            await ctx.send(
+                "The dashboard hasn't been configured for this server yet.",
+                ephemeral=True,
+            )
+            return
+        embed = discord.Embed(
+            title=f"{self.bot.cfg.community_name} — Dashboard",
+            description=(
+                f"Track your XP, achievements, and community stats at:\n"
+                f"### [{url}]({url})"
+            ),
+            color=discord.Color.blurple(),
+            url=url,
+        )
+        embed.set_footer(text=self.bot.cfg.community_motto)
+        await ctx.send(embed=embed, ephemeral=True)
 
     # -------------------------------------------------------------------
     # /buy-coffee

@@ -21,11 +21,12 @@ from typing import TYPE_CHECKING
 import discord
 from discord.ext import commands, tasks
 
+from synapse.constants import count_emojis
 from synapse.database.engine import run_db
 from synapse.database.models import InteractionType
-from synapse.constants import count_emojis
 from synapse.engine.events import SynapseEvent
 from synapse.services.announcement_service import announce_rewards
+from synapse.services.profile_service import upsert_profile
 
 if TYPE_CHECKING:
     from synapse.bot.core import SynapseBot
@@ -34,7 +35,7 @@ logger = logging.getLogger(__name__)
 
 
 class Social(commands.Cog, name="Social"):
-    """Awards XP and Stars for Discord messages with quality scoring."""
+    """Awards XP for Discord messages with quality scoring."""
 
     def __init__(self, bot: SynapseBot) -> None:
         self.bot = bot
@@ -100,6 +101,7 @@ class Social(commands.Cog, name="Social"):
             attachment_count=len(message.attachments),
             is_reply=is_reply,
             reply_to_user_id=reply_to_user_id,
+            sticker_count=len(message.stickers),
         )
 
     @commands.Cog.listener()
@@ -119,8 +121,11 @@ class Social(commands.Cog, name="Social"):
                 "Error processing message %s from user %s",
                 message.id,
                 message.author.id,
-                extra={"event_type": "message", "user_id": message.author.id,
-                       "message_id": message.id},
+                extra={
+                    "event_type": "message",
+                    "user_id": message.author.id,
+                    "message_id": message.id,
+                },
             )
 
     async def _handle_message(self, message: discord.Message) -> None:
@@ -135,6 +140,28 @@ class Social(commands.Cog, name="Social"):
         if message.guild is None:
             logger.debug("Ignoring DM from %s", message.author.name)
             return
+
+        # --- Best-effort profile sync (Phase 5) ----------------------------
+        # Non-blocking: runs on a background thread via run_db.
+        # Failures are logged at DEBUG level and never interrupt XP processing.
+        try:
+            avatar_url: str | None = (
+                message.author.display_avatar.url if message.author.display_avatar else None
+            )
+            await run_db(
+                upsert_profile,
+                self.bot.engine,
+                message.author.id,
+                message.guild.id,
+                message.author.name,
+                avatar_url,
+            )
+        except Exception:
+            logger.debug(
+                "Profile sync failed for author=%d",
+                message.author.id,
+                exc_info=True,
+            )
 
         # Gate 3: Per-user-per-channel cooldown
         now = time.time()
@@ -173,10 +200,9 @@ class Social(commands.Cog, name="Social"):
 
         level_str = f" Level {result.new_level} UP!" if result.leveled_up else ""
         logger.info(
-            "Message processed: %s (+%d XP, +%d ☆)%s",
+            "Message processed: %s (+%d XP)%s",
             message.author.display_name,
             result.xp,
-            result.stars,
             level_str,
         )
 

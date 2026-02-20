@@ -19,7 +19,6 @@ from __future__ import annotations
 import json
 import logging
 import time
-from enum import StrEnum
 from datetime import UTC, datetime
 from typing import Any
 
@@ -28,32 +27,22 @@ from sqlalchemy.exc import IntegrityError
 
 from synapse.constants import count_emojis
 from synapse.database.engine import get_session
-from synapse.database.models import EventLake, Setting
+from synapse.database.models import EventLake, Setting, SourceCategory
+from synapse.engine.events import EventType  # re-exported for callers
 
 logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Event type constants (match 03B_DATA_LAKE.md §3B.4)
-# ---------------------------------------------------------------------------
-class EventType(StrEnum):
-    """Event type string constants for the Event Lake."""
-    MESSAGE_CREATE = "message_create"
-    REACTION_ADD = "reaction_add"
-    REACTION_REMOVE = "reaction_remove"
-    THREAD_CREATE = "thread_create"
-    VOICE_JOIN = "voice_join"
-    VOICE_LEAVE = "voice_leave"
-    VOICE_MOVE = "voice_move"
-    MEMBER_JOIN = "member_join"
-    MEMBER_LEAVE = "member_leave"
-
-
-# ---------------------------------------------------------------------------
 # Message quality metadata extraction (privacy-safe)
 # ---------------------------------------------------------------------------
-def extract_message_metadata(content: str, attachments: int, is_reply: bool,
-                             reply_to_user_id: int | None = None) -> dict[str, Any]:
+def extract_message_metadata(
+    content: str,
+    attachments: int,
+    is_reply: bool,
+    reply_to_user_id: int | None = None,
+    sticker_count: int = 0,
+) -> dict[str, Any]:
     """Extract quality metadata from message content, then discard text.
 
     Per Decision D03B-07: message content is NEVER persisted.
@@ -67,6 +56,7 @@ def extract_message_metadata(content: str, attachments: int, is_reply: bool,
         "emoji_count": count_emojis(content),  # improved regex
         "is_reply": is_reply,
         "reply_to_user_id": reply_to_user_id,
+        "sticker_count": sticker_count,
     }
 
 
@@ -96,11 +86,17 @@ class VoiceSessionTracker:
         if user_id not in self._sessions:
             self._sessions[user_id] = {}
         self._sessions[user_id][guild_id] = (
-            time.time(), channel_id, session_id, self_mute, self_deaf,
+            time.time(),
+            channel_id,
+            session_id,
+            self_mute,
+            self_deaf,
         )
 
     def leave(
-        self, user_id: int, guild_id: int,
+        self,
+        user_id: int,
+        guild_id: int,
     ) -> tuple[float, int, str, bool, bool] | None:
         """Pop a voice session and return (join_time, channel_id, session_id, mute, deaf).
 
@@ -115,13 +111,21 @@ class VoiceSessionTracker:
         return self._sessions.get(user_id, {}).get(guild_id)
 
     def update_state(
-        self, user_id: int, guild_id: int, self_mute: bool, self_deaf: bool,
+        self,
+        user_id: int,
+        guild_id: int,
+        self_mute: bool,
+        self_deaf: bool,
     ) -> None:
         """Update mute/deaf state for idle detection on leave."""
         if user_id in self._sessions and guild_id in self._sessions[user_id]:
             join_time, channel_id, session_id, _, _ = self._sessions[user_id][guild_id]
             self._sessions[user_id][guild_id] = (
-                join_time, channel_id, session_id, self_mute, self_deaf,
+                join_time,
+                channel_id,
+                session_id,
+                self_mute,
+                self_deaf,
             )
 
 
@@ -194,9 +198,7 @@ class EventLakeWriter:
         try:
             with get_session(self.engine) as session:
                 rows = session.scalars(
-                    select(Setting).where(
-                        Setting.key.like("event_lake.source.%.enabled")
-                    )
+                    select(Setting).where(Setting.key.like("event_lake.source.%.enabled"))
                 ).all()
 
             disabled: set[str] = set()
@@ -210,8 +212,7 @@ class EventLakeWriter:
                 if len(parts) == 4:
                     event_type = parts[2]
                     is_disabled = val is False or (
-                        isinstance(val, str)
-                        and val.lower() in ("false", "0", "no")
+                        isinstance(val, str) and val.lower() in ("false", "0", "no")
                     )
                     if is_disabled:
                         disabled.add(event_type)
@@ -236,6 +237,7 @@ class EventLakeWriter:
         guild_id: int,
         user_id: int,
         event_type: str,
+        source_category: SourceCategory | None = None,
         channel_id: int | None = None,
         target_id: int | None = None,
         payload: dict[str, Any] | None = None,
@@ -258,6 +260,7 @@ class EventLakeWriter:
             guild_id=guild_id,
             user_id=user_id,
             event_type=event_type,
+            source_category=source_category,
             channel_id=channel_id,
             target_id=target_id,
             payload=payload or {},
@@ -275,7 +278,9 @@ class EventLakeWriter:
                 session.rollback()
                 logger.debug(
                     "Duplicate event skipped: source_id=%s type=%s user=%s",
-                    source_id, event_type, user_id,
+                    source_id,
+                    event_type,
+                    user_id,
                 )
                 return False
 
@@ -294,15 +299,21 @@ class EventLakeWriter:
         attachment_count: int = 0,
         is_reply: bool = False,
         reply_to_user_id: int | None = None,
+        sticker_count: int = 0,
     ) -> bool:
         """Write a message_create event with privacy-safe metadata extraction."""
         payload = extract_message_metadata(
-            content, attachment_count, is_reply, reply_to_user_id,
+            content,
+            attachment_count,
+            is_reply,
+            reply_to_user_id,
+            sticker_count,
         )
         return self.write_event(
             guild_id=guild_id,
             user_id=user_id,
             event_type=EventType.MESSAGE_CREATE,
+            source_category=SourceCategory.GATEWAY,
             channel_id=channel_id,
             target_id=reply_to_user_id,
             payload=payload,
@@ -325,6 +336,7 @@ class EventLakeWriter:
             guild_id=guild_id,
             user_id=user_id,
             event_type=EventType.REACTION_ADD,
+            source_category=SourceCategory.GATEWAY,
             channel_id=channel_id,
             target_id=message_author_id,
             payload={
@@ -349,6 +361,7 @@ class EventLakeWriter:
             guild_id=guild_id,
             user_id=user_id,
             event_type=EventType.REACTION_REMOVE,
+            source_category=SourceCategory.GATEWAY,
             channel_id=channel_id,
             target_id=message_author_id,
             payload={
@@ -372,6 +385,7 @@ class EventLakeWriter:
             guild_id=guild_id,
             user_id=user_id,
             event_type=EventType.THREAD_CREATE,
+            source_category=SourceCategory.GATEWAY,
             channel_id=parent_channel_id,
             target_id=parent_channel_id,
             payload={
@@ -396,13 +410,19 @@ class EventLakeWriter:
 
         # Track session in memory for duration calculation on leave
         self.voice_tracker.join(
-            user_id, guild_id, channel_id, session_id, self_mute, self_deaf,
+            user_id,
+            guild_id,
+            channel_id,
+            session_id,
+            self_mute,
+            self_deaf,
         )
 
         return self.write_event(
             guild_id=guild_id,
             user_id=user_id,
             event_type=EventType.VOICE_JOIN,
+            source_category=SourceCategory.GATEWAY,
             channel_id=channel_id,
             payload={
                 "channel_id": str(channel_id),
@@ -430,7 +450,7 @@ class EventLakeWriter:
             join_time, join_channel, _, join_mute, join_deaf = session_info
             duration_seconds = int(time.time() - join_time)
             # AFK detection: was idle (mute+deaf) for entire session?
-            was_idle_entire = (join_mute and join_deaf and self_mute and self_deaf)
+            was_idle_entire = join_mute and join_deaf and self_mute and self_deaf
         else:
             duration_seconds = 0
             was_idle_entire = self_mute and self_deaf
@@ -441,6 +461,7 @@ class EventLakeWriter:
             guild_id=guild_id,
             user_id=user_id,
             event_type=EventType.VOICE_LEAVE,
+            source_category=SourceCategory.GATEWAY,
             channel_id=channel_id,
             payload={
                 "channel_id": str(channel_id),
@@ -471,7 +492,11 @@ class EventLakeWriter:
         if session_info:
             join_time = session_info[0]
             self.voice_tracker._sessions[user_id][guild_id] = (
-                join_time, to_channel_id, session_id, self_mute, self_deaf,
+                join_time,
+                to_channel_id,
+                session_id,
+                self_mute,
+                self_deaf,
             )
 
         ts = datetime.now(UTC)
@@ -479,6 +504,7 @@ class EventLakeWriter:
             guild_id=guild_id,
             user_id=user_id,
             event_type=EventType.VOICE_MOVE,
+            source_category=SourceCategory.GATEWAY,
             channel_id=to_channel_id,
             payload={
                 "from_channel_id": str(from_channel_id),
@@ -502,6 +528,7 @@ class EventLakeWriter:
             guild_id=guild_id,
             user_id=user_id,
             event_type=EventType.MEMBER_JOIN,
+            source_category=SourceCategory.GATEWAY,
             payload={
                 "joined_at": joined_at.isoformat() if joined_at else ts.isoformat(),
             },
@@ -521,7 +548,37 @@ class EventLakeWriter:
             guild_id=guild_id,
             user_id=user_id,
             event_type=EventType.MEMBER_LEAVE,
+            source_category=SourceCategory.GATEWAY,
             payload={},
             source_id=f"{user_id}-leave-{int(ts.timestamp())}",
             timestamp=ts,
+        )
+
+    def write_poll_vote(
+        self,
+        *,
+        guild_id: int,
+        user_id: int,
+        channel_id: int,
+        poll_message_id: int,
+        answer_id: int,
+    ) -> bool:
+        """Write a poll_vote event.
+
+        Idempotent: source_id ensures each (user, poll, answer) combination
+        is recorded at most once, even across bot restarts.
+        """
+        source_id = f"poll-{poll_message_id}-{user_id}-{answer_id}"
+        return self.write_event(
+            guild_id=guild_id,
+            user_id=user_id,
+            event_type=EventType.POLL_VOTE,
+            source_category=SourceCategory.GATEWAY,
+            channel_id=channel_id,
+            target_id=poll_message_id,
+            payload={
+                "poll_message_id": str(poll_message_id),
+                "answer_id": answer_id,
+            },
+            source_id=source_id,
         )

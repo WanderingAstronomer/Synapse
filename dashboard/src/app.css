@@ -179,15 +179,73 @@
 }
 
 /* ---------------------------------------------------------------------------
- *  Mobile sidebar & header
+ *  Sidebar responsive system
+ *
+ *  Three tiers:
+ *    >= lg (1024px+)      - Full sidebar (18rem): brand, labels, details
+ *    md -> lg (768-1023px) - Collapsed sidebar (4rem): icons only
+ *    < md  (< 768px)      - No sidebar; hamburger opens mobile overlay
  * ------------------------------------------------------------------------- */
 
+.sidebar-desktop {
+	width: 18rem;
+	transition: width 200ms ease;
+}
+
+.sidebar-brand-icon {
+	display: none;
+}
+
+.sidebar-desktop .sidebar-close-btn {
+	display: none;
+}
+
+/* Tablet collapsed state */
+@media (min-width: 768px) and (max-width: 1023px) {
+	.sidebar-desktop {
+		width: 4rem;
+	}
+	.sidebar-desktop .sidebar-brand-text,
+	.sidebar-desktop .sidebar-subtitle,
+	.sidebar-desktop .sidebar-section-label,
+	.sidebar-desktop .sidebar-text,
+	.sidebar-desktop .sidebar-health-text,
+	.sidebar-desktop .sidebar-user-info {
+		display: none;
+	}
+	.sidebar-desktop .sidebar-brand-icon {
+		display: flex;
+	}
+	.sidebar-desktop .nav-link {
+		justify-content: center;
+		padding-inline: 0.5rem;
+	}
+	.sidebar-desktop nav {
+		padding-inline: 0.375rem;
+	}
+	.sidebar-desktop .sidebar-header {
+		padding-inline: 0.5rem;
+	}
+	.sidebar-desktop .sidebar-footer {
+		padding-inline: 0.5rem;
+	}
+	.sidebar-desktop .sidebar-health {
+		flex-direction: column;
+		gap: 0.25rem;
+	}
+	.sidebar-desktop .sidebar-health-badge {
+		border: 0;
+		padding: 0.25rem;
+		justify-content: center;
+	}
+}
+
+/* Mobile header - visible only below md */
 .mobile-header {
 	display: none;
 }
 
-/* Below the lg breakpoint (1024px): show mobile header, use overlay sidebar */
-@media (max-width: 1023px) {
+@media (max-width: 767px) {
 	.mobile-header {
 		display: flex;
 		align-items: center;
@@ -200,24 +258,25 @@
 		border-bottom: 1px solid theme('colors.surface.300');
 		background-color: theme('colors.surface.50');
 	}
+}
 
-	.sidebar-backdrop {
-		position: fixed;
-		inset: 0;
-		z-index: 40;
-		background-color: rgba(0, 0, 0, 0.6);
-		backdrop-filter: blur(2px);
-	}
+/* Mobile sidebar overlay & backdrop */
+.sidebar-backdrop {
+	position: fixed;
+	inset: 0;
+	z-index: 40;
+	background-color: rgba(0, 0, 0, 0.6);
+	backdrop-filter: blur(2px);
+}
 
-	.sidebar-mobile {
-		position: fixed;
-		top: 0;
-		left: 0;
-		z-index: 50;
-		width: 18rem; /* w-72 */
-		height: 100dvh;
-		background-color: theme('colors.surface.50');
-		border-right: 1px solid theme('colors.surface.300');
-		overflow-y: auto;
-	}
+.sidebar-mobile {
+	position: fixed;
+	top: 0;
+	left: 0;
+	z-index: 50;
+	width: 18rem;
+	height: 100dvh;
+	background-color: theme('colors.surface.50');
+	border-right: 1px solid theme('colors.surface.300');
+	overflow-y: auto;
 }

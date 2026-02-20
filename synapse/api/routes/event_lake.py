@@ -35,6 +35,7 @@ router = APIRouter(prefix="/admin/event-lake", tags=["event-lake"])
 # ---------------------------------------------------------------------------
 class EventRow(BaseModel):
     """Single event from the Event Lake."""
+
     id: int
     guild_id: str
     user_id: str
@@ -48,6 +49,7 @@ class EventRow(BaseModel):
 
 class EventListResponse(BaseModel):
     """Paginated list of events."""
+
     total: int
     page: int
     page_size: int
@@ -56,6 +58,7 @@ class EventListResponse(BaseModel):
 
 class DataSourceConfig(BaseModel):
     """Per–event-type toggle and metadata."""
+
     event_type: str
     enabled: bool
     label: str
@@ -64,12 +67,14 @@ class DataSourceConfig(BaseModel):
 
 class DataSourceToggle(BaseModel):
     """Toggle request body."""
+
     event_type: str
     enabled: bool
 
 
 class VolumePoint(BaseModel):
     """Single data point in the volume time-series."""
+
     date: str
     event_type: str
     count: int
@@ -77,6 +82,7 @@ class VolumePoint(BaseModel):
 
 class HealthResponse(BaseModel):
     """Event Lake health / size dashboard."""
+
     total_events: int
     total_counters: int
     oldest_event: str | None
@@ -110,6 +116,7 @@ class BackfillResult(BaseModel):
 
 class StorageEstimate(BaseModel):
     """§3B.5-style storage estimate."""
+
     avg_row_bytes: int
     total_rows: int
     estimated_bytes: int
@@ -275,8 +282,11 @@ def toggle_data_sources(
             raise HTTPException(400, f"Unknown event type: {t.event_type}")
         key = _TOGGLE_KEY.format(event_type=t.event_type)
         settings_service.upsert_setting(
-            engine, key=key, value=t.enabled,
-            category="event_lake", description=f"Enable {t.event_type} data source",
+            engine,
+            key=key,
+            value=t.enabled,
+            category="event_lake",
+            description=f"Enable {t.event_type} data source",
         )
         updated += 1
 
@@ -300,23 +310,26 @@ def event_lake_health(
 
     # Events today
     today_start = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
-    events_today = session.scalar(
-        select(func.count()).select_from(EventLake)
-        .where(EventLake.timestamp >= today_start)
-    ) or 0
+    events_today = (
+        session.scalar(
+            select(func.count()).select_from(EventLake).where(EventLake.timestamp >= today_start)
+        )
+        or 0
+    )
 
     # Events last 7 days
     seven_days_ago = datetime.now(UTC) - timedelta(days=7)
-    events_7d = session.scalar(
-        select(func.count()).select_from(EventLake)
-        .where(EventLake.timestamp >= seven_days_ago)
-    ) or 0
+    events_7d = (
+        session.scalar(
+            select(func.count())
+            .select_from(EventLake)
+            .where(EventLake.timestamp >= seven_days_ago)
+        )
+        or 0
+    )
 
     # Volume by type (all time)
-    type_q = (
-        select(EventLake.event_type, func.count().label("cnt"))
-        .group_by(EventLake.event_type)
-    )
+    type_q = select(EventLake.event_type, func.count().label("cnt")).group_by(EventLake.event_type)
     volume_by_type = {row.event_type: row.cnt for row in session.execute(type_q)}
 
     # Daily volume time-series (last N days)
@@ -367,9 +380,7 @@ def storage_estimate(
     """
     avg_row_bytes = 340  # from design doc estimates
 
-    total_rows = session.scalar(
-        select(func.count()).select_from(EventLake)
-    ) or 0
+    total_rows = session.scalar(select(func.count()).select_from(EventLake)) or 0
 
     estimated_bytes = total_rows * avg_row_bytes
 
@@ -390,7 +401,7 @@ def storage_estimate(
         total_rows=total_rows,
         estimated_bytes=estimated_bytes,
         estimated_mb=round(estimated_bytes / (1024 * 1024), 2),
-        estimated_gb=round(estimated_bytes / (1024 ** 3), 4),
+        estimated_gb=round(estimated_bytes / (1024**3), 4),
         daily_rate=round(daily_rate, 1),
         days_of_data=days_of_data,
         projected_90d_mb=round(projected_90d_bytes / (1024 * 1024), 2),
@@ -457,11 +468,7 @@ def list_counters(
         q = q.where(EventCounter.event_type == event_type)
     q = q.where(EventCounter.period == period)
 
-    total = session.scalar(
-        select(func.count()).select_from(
-            q.subquery()
-        )
-    ) or 0
+    total = session.scalar(select(func.count()).select_from(q.subquery())) or 0
 
     rows = session.scalars(q.offset((page - 1) * page_size).limit(page_size)).all()
 

@@ -165,14 +165,18 @@
 </svelte:head>
 
 <!-- Tab Switcher -->
-<div class="flex items-center gap-1 mb-4 bg-surface-100 border border-surface-300 rounded-xl p-1 w-fit">
+<div class="flex items-center gap-1 mb-4 bg-surface-100 border border-surface-300 rounded-xl p-1 w-fit" role="tablist" aria-label="Log view tabs">
 	<button
+		role="tab"
+		aria-selected={activeTab === 'live'}
 		class="px-4 py-2 rounded-lg text-sm font-medium transition-all {activeTab === 'live' ? 'bg-brand-600 text-white shadow-lg shadow-brand-500/20' : 'text-zinc-400 hover:text-zinc-200 hover:bg-surface-200'}"
 		onclick={() => { activeTab = 'live'; history.replaceState(null, '', '/admin/logs?tab=live'); }}
 	>
 		Live Logs
 	</button>
 	<button
+		role="tab"
+		aria-selected={activeTab === 'audit'}
 		class="px-4 py-2 rounded-lg text-sm font-medium transition-all {activeTab === 'audit' ? 'bg-brand-600 text-white shadow-lg shadow-brand-500/20' : 'text-zinc-400 hover:text-zinc-200 hover:bg-surface-200'}"
 		onclick={() => { activeTab = 'audit'; history.replaceState(null, '', '/admin/logs?tab=audit'); }}
 	>
@@ -234,6 +238,7 @@
 				placeholder="e.g. synapse.bot"
 				bind:value={loggerFilter}
 				onkeydown={(e) => { if (e.key === 'Enter') load(); }}
+				aria-label="Filter by logger name"
 			/>
 		</div>
 

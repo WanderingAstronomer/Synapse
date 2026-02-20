@@ -24,8 +24,8 @@
 			// Verify token server-side before granting access
 			const user = await auth.login(token);
 			if (user) {
-				flash.success('Signed in as admin');
-				goto('/admin/setup');
+				flash.success(user.is_admin ? 'Signed in as admin' : 'Signed in');
+				goto(user.is_admin ? '/admin/setup' : '/');
 			} else {
 				flash.error('Authentication failed — token could not be verified.');
 				goto('/');

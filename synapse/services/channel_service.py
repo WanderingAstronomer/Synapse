@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 # Channel metadata sync (guild snapshot → channels table)
 # ---------------------------------------------------------------------------
 
+
 def sync_channels_from_snapshot(engine, guild_id: int, channels: list[dict]) -> dict:
     """Upsert Discord channel metadata into the ``channels`` table.
 
@@ -59,20 +60,18 @@ def sync_channels_from_snapshot(engine, guild_id: int, channels: list[dict]) -> 
             upserted += 1
 
         # Remove channels that are no longer in the guild
-        existing = session.scalars(
-            select(Channel.id).where(Channel.guild_id == guild_id)
-        ).all()
+        existing = session.scalars(select(Channel.id).where(Channel.guild_id == guild_id)).all()
         stale_ids = set(existing) - incoming_ids
         if stale_ids:
-            session.execute(
-                Channel.__table__.delete().where(Channel.id.in_(stale_ids))
-            )
+            session.execute(Channel.__table__.delete().where(Channel.id.in_(stale_ids)))
             removed = len(stale_ids)
 
         session.commit()
 
     logger.info(
         "Channel sync for guild %d: %d upserted, %d removed.",
-        guild_id, upserted, removed,
+        guild_id,
+        upserted,
+        removed,
     )
     return {"upserted": upserted, "removed": removed}

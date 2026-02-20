@@ -123,9 +123,10 @@ Initial release.
 
 ### Deferred
 
-- Quest system UI (schema exists, no dashboard/command interface).
+- Quest system (concept only — no schema or UI yet).
 - GitHub Neural Bridge integration.
-- LLM quality modifier (`llm_quality_modifier()` returns 1.0 — placeholder).
+- LLM quality modifier (removed — quality scoring is rule-based).
 - Custom badge image uploads.
 - DM notification delivery.
 - Redis session store for multi-instance OAuth state.
+- Invite-count achievement trigger (requires invite tracking infrastructure).

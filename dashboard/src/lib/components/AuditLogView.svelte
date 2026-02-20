@@ -2,7 +2,7 @@
 	import { onMount } from 'svelte';
 	import { api, type AuditLogEntry } from '$lib/api';
 	import { flash } from '$lib/stores/flash.svelte';
-	import { userNames, requestResolve, resolveUser } from '$lib/stores/names';
+	import { names, resolveUser } from '$lib/stores/names.svelte';
 	import { fmtDateTime, capitalize } from '$lib/utils';
 	import SynapseLoader from '$lib/components/SynapseLoader.svelte';
 
@@ -20,7 +20,7 @@
 			entries = res.entries;
 			total = res.total;
 			const actorIds = [...new Set(entries.map((e) => e.actor_id))];
-			if (actorIds.length > 0) requestResolve(actorIds);
+			if (actorIds.length > 0) names.requestResolve(actorIds);
 		} catch (e) { flash.error('Failed to load audit log'); }
 		finally { loading = false; }
 	}
@@ -171,7 +171,7 @@
 
 						<div class="flex items-center gap-4 mt-3 pt-3 border-t border-surface-300/30">
 							<p class="text-xs text-zinc-500">
-								Actor: <span class="font-mono text-brand-400">{resolveUser(entry.actor_id, $userNames)}</span>
+								Actor: <span class="font-mono text-brand-400">{resolveUser(entry.actor_id, names.users)}</span>
 							</p>
 							<p class="text-xs text-zinc-500">
 								Entry: <span class="font-mono text-zinc-400">#{entry.id}</span>

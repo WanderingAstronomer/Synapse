@@ -16,6 +16,8 @@ import logging
 from typing import TYPE_CHECKING
 
 from discord.abc import Messageable, Snowflake
+from sqlalchemy import select
+from sqlalchemy.orm import joinedload
 
 from synapse.database.engine import run_db
 from synapse.database.models import AchievementTemplate, UserPreferences
@@ -62,7 +64,14 @@ def _load_achievement_template(engine, ach_id: int) -> AchievementTemplate | Non
     from synapse.database.engine import get_session  # noqa: E402 — avoid circular
 
     with get_session(engine) as session:
-        tmpl = session.get(AchievementTemplate, ach_id)
+        # Load joined relations to avoid DetachedInstanceError when accessed later
+        # (e.g. rarity name in embed builder)
+        query = (
+            select(AchievementTemplate)
+            .where(AchievementTemplate.id == ach_id)
+            .options(joinedload(AchievementTemplate.rarity))
+        )
+        tmpl = session.scalar(query)
         if tmpl:
             session.expunge(tmpl)
         return tmpl
@@ -105,9 +114,7 @@ def resolve_announce_channel(
 # ---------------------------------------------------------------------------
 # Sending helper (handles throttle + queue)
 # ---------------------------------------------------------------------------
-async def _send_embed(
-    channel: Messageable | None, embed: discord.Embed
-) -> None:
+async def _send_embed(channel: Messageable | None, embed: discord.Embed) -> None:
     if channel is None:
         return
     channel_id = getattr(channel, "id", 0)
@@ -115,9 +122,7 @@ async def _send_embed(
         try:
             await channel.send(embed=embed)
         except Exception:
-            logger.exception(
-                "Failed to send announcement embed to channel %d", channel_id
-            )
+            logger.exception("Failed to send announcement embed to channel %d", channel_id)
     else:
         _throttle.enqueue(channel_id, embed, channel)
 
@@ -138,22 +143,20 @@ async def announce_rewards(
     if not result.leveled_up and not result.achievements_earned:
         return
 
-    prefs: UserPreferences | None = await run_db(
-        _load_preferences, bot.engine, user_id
-    )
+    prefs: UserPreferences | None = await run_db(_load_preferences, bot.engine, user_id)
 
     if result.leveled_up:
         announce_lu = prefs.announce_level_up if prefs else True
         if announce_lu:
-            target = resolve_announce_channel(
-                bot, fallback_channel=fallback_channel
-            )
+            level_up_msg = str(bot.cache.get_setting("level_up_message", "")) or None
+            target = resolve_announce_channel(bot, fallback_channel=fallback_channel)
             embed = build_level_up_embed(
                 user_id,
                 display_name,
                 avatar_url,
                 result.new_level,
                 result.gold_bonus,
+                message_template=level_up_msg,
             )
             await _send_embed(target, embed)
 
@@ -170,16 +173,10 @@ async def announce_rewards(
                         achievement_template=tmpl,
                         fallback_channel=fallback_channel,
                     )
-                    embed = build_achievement_embed(
-                        user_id, display_name, avatar_url, tmpl
-                    )
+                    embed = build_achievement_embed(user_id, display_name, avatar_url, tmpl)
                 else:
-                    target = resolve_announce_channel(
-                        bot, fallback_channel=fallback_channel
-                    )
-                    embed = build_achievement_fallback_embed(
-                        user_id, display_name, avatar_url
-                    )
+                    target = resolve_announce_channel(bot, fallback_channel=fallback_channel)
+                    embed = build_achievement_fallback_embed(user_id, display_name, avatar_url)
                 await _send_embed(target, embed)
 
 
@@ -196,9 +193,7 @@ async def announce_manual_award(
     fallback_channel: Snowflake | Messageable | None = None,
 ) -> None:
     """Announce a manual XP/Gold award (from /award command)."""
-    prefs: UserPreferences | None = await run_db(
-        _load_preferences, bot.engine, recipient_id
-    )
+    prefs: UserPreferences | None = await run_db(_load_preferences, bot.engine, recipient_id)
     announce = prefs.announce_awards if prefs else True
     if not announce:
         return
@@ -221,9 +216,7 @@ async def announce_achievement_grant(
     fallback_channel: Snowflake | Messageable | None = None,
 ) -> None:
     """Announce a manually granted achievement (from /grant-achievement)."""
-    prefs: UserPreferences | None = await run_db(
-        _load_preferences, bot.engine, recipient_id
-    )
+    prefs: UserPreferences | None = await run_db(_load_preferences, bot.engine, recipient_id)
     announce = prefs.announce_achievements if prefs else True
     if not announce:
         return
@@ -237,17 +230,11 @@ async def announce_achievement_grant(
             achievement_template=tmpl,
             fallback_channel=fallback_channel,
         )
-        embed = build_achievement_embed(
-            recipient_id, display_name, avatar_url, tmpl
-        )
+        embed = build_achievement_embed(recipient_id, display_name, avatar_url, tmpl)
         embed.set_footer(text=f"Granted by {admin_name}")
     else:
-        target = resolve_announce_channel(
-            bot, fallback_channel=fallback_channel
-        )
-        embed = build_achievement_fallback_embed(
-            recipient_id, display_name, avatar_url
-        )
+        target = resolve_announce_channel(bot, fallback_channel=fallback_channel)
+        embed = build_achievement_fallback_embed(recipient_id, display_name, avatar_url)
         embed.set_footer(text=f"Granted by {admin_name}")
 
     await _send_embed(target, embed)

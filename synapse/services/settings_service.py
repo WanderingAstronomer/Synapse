@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 # Reads
 # ---------------------------------------------------------------------------
 
+
 def get_setting(engine, key: str) -> dict | None:
     """Fetch a single setting by key, returned as a plain dict."""
     with Session(engine) as session:
@@ -68,9 +69,7 @@ def get_setting_value(session: Session, key: str, default=None):
 def get_all_settings(engine) -> list[Setting]:
     """Fetch every setting row, ordered by category then key."""
     with Session(engine) as session:
-        rows = session.scalars(
-            select(Setting).order_by(Setting.category, Setting.key)
-        ).all()
+        rows = session.scalars(select(Setting).order_by(Setting.category, Setting.key)).all()
         # Expunge so callers can read outside the session
         for r in rows:
             session.expunge(r)
@@ -80,6 +79,7 @@ def get_all_settings(engine) -> list[Setting]:
 # ---------------------------------------------------------------------------
 # Writes
 # ---------------------------------------------------------------------------
+
 
 def upsert_setting(
     engine,
@@ -167,14 +167,16 @@ def bulk_upsert(engine, settings: list[dict], *, actor_id: int | None = None) ->
                 }
                 # Only log if something actually changed
                 if before_snapshot != after_snapshot:
-                    session.add(AdminLog(
-                        actor_id=actor_id,
-                        action_type="UPDATE" if before_snapshot else "CREATE",
-                        target_table="settings",
-                        target_id=key,
-                        before_snapshot=before_snapshot,
-                        after_snapshot=after_snapshot,
-                    ))
+                    session.add(
+                        AdminLog(
+                            actor_id=actor_id,
+                            action_type="UPDATE" if before_snapshot else "CREATE",
+                            target_table="settings",
+                            target_id=key,
+                            before_snapshot=before_snapshot,
+                            after_snapshot=after_snapshot,
+                        )
+                    )
 
             count += 1
         session.commit()

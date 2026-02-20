@@ -134,8 +134,7 @@ def list_achievement_categories(
     ).all()
     return {
         "categories": [
-            {"id": c.id, "name": c.name, "icon": c.icon, "sort_order": c.sort_order}
-            for c in rows
+            {"id": c.id, "name": c.name, "icon": c.icon, "sort_order": c.sort_order} for c in rows
         ]
     }
 
@@ -148,8 +147,11 @@ def create_achievement_category(
     cfg: SynapseConfig = Depends(get_config),
 ):
     cat = admin_service.create_achievement_category(
-        engine, guild_id=cfg.guild_id,
-        name=body.name, icon=body.icon, sort_order=body.sort_order,
+        engine,
+        guild_id=cfg.guild_id,
+        name=body.name,
+        icon=body.icon,
+        sort_order=body.sort_order,
         actor_id=int(admin["sub"]),
     )
     return {"id": cat.id, "name": cat.name}
@@ -162,11 +164,14 @@ def update_achievement_category(
     admin: dict = Depends(rate_limited_admin),
     engine=Depends(get_engine),
 ):
-    kwargs = body.model_dump(exclude_none=True)
+    kwargs = body.model_dump(exclude_unset=True)
     if not kwargs:
         raise HTTPException(400, "No fields to update")
     cat = admin_service.update_achievement_category(
-        engine, category_id=category_id, actor_id=int(admin["sub"]), **kwargs,
+        engine,
+        category_id=category_id,
+        actor_id=int(admin["sub"]),
+        **kwargs,
     )
     if not cat:
         raise HTTPException(404, "Category not found")
@@ -180,7 +185,9 @@ def delete_achievement_category(
     engine=Depends(get_engine),
 ):
     if not admin_service.delete_achievement_category(
-        engine, category_id=category_id, actor_id=int(admin["sub"]),
+        engine,
+        category_id=category_id,
+        actor_id=int(admin["sub"]),
     ):
         raise HTTPException(404, "Category not found")
     return None
@@ -216,8 +223,12 @@ def create_achievement_rarity(
     cfg: SynapseConfig = Depends(get_config),
 ):
     rar = admin_service.create_achievement_rarity(
-        engine, guild_id=cfg.guild_id,
-        name=body.name, color=body.color, sort_order=body.sort_order,
+        engine,
+        guild_id=cfg.guild_id,
+        name=body.name,
+        color=body.color,
+        emoji=body.emoji,
+        sort_order=body.sort_order,
         actor_id=int(admin["sub"]),
     )
     return {"id": rar.id, "name": rar.name}
@@ -230,11 +241,14 @@ def update_achievement_rarity(
     admin: dict = Depends(rate_limited_admin),
     engine=Depends(get_engine),
 ):
-    kwargs = body.model_dump(exclude_none=True)
+    kwargs = body.model_dump(exclude_unset=True)
     if not kwargs:
         raise HTTPException(400, "No fields to update")
     rar = admin_service.update_achievement_rarity(
-        engine, rarity_id=rarity_id, actor_id=int(admin["sub"]), **kwargs,
+        engine,
+        rarity_id=rarity_id,
+        actor_id=int(admin["sub"]),
+        **kwargs,
     )
     if not rar:
         raise HTTPException(404, "Rarity not found")
@@ -248,7 +262,9 @@ def delete_achievement_rarity(
     engine=Depends(get_engine),
 ):
     if not admin_service.delete_achievement_rarity(
-        engine, rarity_id=rarity_id, actor_id=int(admin["sub"]),
+        engine,
+        rarity_id=rarity_id,
+        actor_id=int(admin["sub"]),
     ):
         raise HTTPException(404, "Rarity not found")
     return None
@@ -268,12 +284,7 @@ def list_achievement_series(
         .where(AchievementSeries.guild_id == cfg.guild_id)
         .order_by(AchievementSeries.name)
     ).all()
-    return {
-        "series": [
-            {"id": s.id, "name": s.name, "description": s.description}
-            for s in rows
-        ]
-    }
+    return {"series": [{"id": s.id, "name": s.name, "description": s.description} for s in rows]}
 
 
 @router.post("/achievement-series", status_code=201)
@@ -284,8 +295,10 @@ def create_achievement_series(
     cfg: SynapseConfig = Depends(get_config),
 ):
     series = admin_service.create_achievement_series(
-        engine, guild_id=cfg.guild_id,
-        name=body.name, description=body.description,
+        engine,
+        guild_id=cfg.guild_id,
+        name=body.name,
+        description=body.description,
         actor_id=int(admin["sub"]),
     )
     return {"id": series.id, "name": series.name}
@@ -298,11 +311,14 @@ def update_achievement_series(
     admin: dict = Depends(rate_limited_admin),
     engine=Depends(get_engine),
 ):
-    kwargs = body.model_dump(exclude_none=True)
+    kwargs = body.model_dump(exclude_unset=True)
     if not kwargs:
         raise HTTPException(400, "No fields to update")
     series = admin_service.update_achievement_series(
-        engine, series_id=series_id, actor_id=int(admin["sub"]), **kwargs,
+        engine,
+        series_id=series_id,
+        actor_id=int(admin["sub"]),
+        **kwargs,
     )
     if not series:
         raise HTTPException(404, "Series not found")
@@ -316,7 +332,9 @@ def delete_achievement_series(
     engine=Depends(get_engine),
 ):
     if not admin_service.delete_achievement_series(
-        engine, series_id=series_id, actor_id=int(admin["sub"]),
+        engine,
+        series_id=series_id,
+        actor_id=int(admin["sub"]),
     ):
         raise HTTPException(404, "Series not found")
     return None
@@ -329,11 +347,12 @@ def delete_achievement_series(
 def list_achievements(
     admin: dict = Depends(rate_limited_admin),
     session: Session = Depends(get_session),
+    cfg: SynapseConfig = Depends(get_config),
 ):
     templates = session.scalars(
-        select(AchievementTemplate).order_by(
-            AchievementTemplate.name
-        )
+        select(AchievementTemplate)
+        .where(AchievementTemplate.guild_id == cfg.guild_id)
+        .order_by(AchievementTemplate.name)
     ).all()
     return {
         "achievements": [
@@ -373,9 +392,7 @@ def create_achievement(
     # Validate trigger_type
     valid_triggers = {t.value for t in TriggerType}
     if body.trigger_type not in valid_triggers:
-        raise HTTPException(
-            400, f"Invalid trigger_type. Must be one of: {sorted(valid_triggers)}"
-        )
+        raise HTTPException(400, f"Invalid trigger_type. Must be one of: {sorted(valid_triggers)}")
     tmpl = admin_service.create_achievement(
         engine,
         guild_id=cfg.guild_id,
@@ -405,7 +422,7 @@ def update_achievement(
     admin: dict = Depends(rate_limited_admin),
     engine=Depends(get_engine),
 ):
-    kwargs = body.model_dump(exclude_none=True)
+    kwargs = body.model_dump(exclude_unset=True)
     if not kwargs:
         raise HTTPException(400, "No fields to update")
     # Validate trigger_type if being updated
@@ -433,7 +450,9 @@ def delete_achievement(
     engine=Depends(get_engine),
 ):
     if not admin_service.delete_achievement(
-        engine, achievement_id=achievement_id, actor_id=int(admin["sub"]),
+        engine,
+        achievement_id=achievement_id,
+        actor_id=int(admin["sub"]),
     ):
         raise HTTPException(404, "Achievement not found")
     return None
@@ -487,13 +506,16 @@ def grant_achievement(
 
     # Notify the bot to announce the achievement via Discord
     try:
-        send_event_notify(engine, {
-            "type": "achievement_granted",
-            "recipient_id": str(body.user_id),
-            "display_name": body.display_name,
-            "achievement_id": body.achievement_id,
-            "admin_name": admin.get("username", "Admin"),
-        })
+        send_event_notify(
+            engine,
+            {
+                "type": "achievement_granted",
+                "recipient_id": str(body.user_id),
+                "display_name": body.display_name,
+                "achievement_id": body.achievement_id,
+                "admin_name": admin.get("username", "Admin"),
+            },
+        )
     except Exception:
         logger.warning("Failed to send achievement grant notification", exc_info=True)
 

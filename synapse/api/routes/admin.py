@@ -12,7 +12,9 @@ from fastapi import APIRouter
 
 from synapse.api.routes.achievements import router as achievements_router
 from synapse.api.routes.channels import router as channels_router
+from synapse.api.routes.marketplace import admin_marketplace_router
 from synapse.api.routes.media import router as media_router
+from synapse.api.routes.rules import router as rules_router
 from synapse.api.routes.settings import router as settings_router
 
 router = APIRouter()
@@ -23,3 +25,5 @@ router.include_router(channels_router)
 router.include_router(achievements_router)
 router.include_router(settings_router)
 router.include_router(media_router)
+router.include_router(admin_marketplace_router)
+router.include_router(rules_router)

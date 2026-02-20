@@ -63,8 +63,7 @@ async def save_upload(filename: str, content: bytes, content_type: str | None = 
     ext = Path(filename).suffix.lower()
     if ext not in ALLOWED_EXTENSIONS:
         raise ValueError(
-            f"File type not allowed: {ext!r}. "
-            f"Allowed: {', '.join(sorted(ALLOWED_EXTENSIONS))}"
+            f"File type not allowed: {ext!r}. Allowed: {', '.join(sorted(ALLOWED_EXTENSIONS))}"
         )
 
     # MIME type check (if provided)
@@ -93,6 +92,9 @@ def delete_upload(url_path: str) -> bool:
         return False
     filename = url_path.rsplit("/", 1)[-1]
     filepath = UPLOAD_DIR / filename
+    # Defence-in-depth: ensure resolved path stays within UPLOAD_DIR
+    if not filepath.resolve().is_relative_to(UPLOAD_DIR.resolve()):
+        return False
     if filepath.exists() and filepath.is_file():
         filepath.unlink()
         return True

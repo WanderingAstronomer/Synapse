@@ -16,7 +16,6 @@ import logging
 import random
 import select as _select
 import threading
-import time
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import select, text
@@ -44,16 +43,21 @@ NOTIFY_CHANNEL = "config_changed"
 EVENT_NOTIFY_CHANNEL = "synapse_events"
 
 # Allowlist of table names accepted by send_notify() (F-005).
-ALLOWED_NOTIFY_TABLES: frozenset[str] = frozenset({
-    "channel_type_defaults",
-    "channel_overrides",
-    "channels",
-    "achievement_templates",
-    "achievement_categories",
-    "achievement_rarities",
-    "achievement_series",
-    "settings",
-})
+ALLOWED_NOTIFY_TABLES: frozenset[str] = frozenset(
+    {
+        "channel_type_defaults",
+        "channel_overrides",
+        "channels",
+        "achievement_templates",
+        "achievement_categories",
+        "achievement_rarities",
+        "achievement_series",
+        "marketplace_items",
+        "reward_rules",
+        "rule_snapshots",
+        "settings",
+    }
+)
 
 
 class ConfigCache:
@@ -97,7 +101,6 @@ class ConfigCache:
         # key → parsed JSON value
         self._settings: dict[str, Any] = {}
 
-        self._listener_task: asyncio.Task | None = None
         self._listener_healthy: bool = False
         self._listener_failed: bool = False
         self._listener_thread: threading.Thread | None = None
@@ -167,9 +170,18 @@ class ConfigCache:
             self._overrides = ovr
 
     def _load_achievements(self) -> None:
+        from sqlalchemy.orm import selectinload
+
         with Session(self._engine) as session:
             templates = session.scalars(
-                select(AchievementTemplate).where(AchievementTemplate.active.is_(True))
+                select(AchievementTemplate)
+                .where(AchievementTemplate.active.is_(True))
+                .options(
+                    selectinload(AchievementTemplate.rarity),
+                    selectinload(AchievementTemplate.category),
+                    selectinload(AchievementTemplate.series),
+                    selectinload(AchievementTemplate.overlay),
+                )
             ).all()
             by_guild: dict[int, list[AchievementTemplate]] = {}
             by_series: dict[int, list[AchievementTemplate]] = {}
@@ -227,9 +239,7 @@ class ConfigCache:
     # -------------------------------------------------------------------
     # Cache reads (thread-safe)
     # -------------------------------------------------------------------
-    def resolve_multipliers(
-        self, channel_id: int, event_type: str
-    ) -> tuple[float, float]:
+    def resolve_multipliers(self, channel_id: int, event_type: str) -> tuple[float, float]:
         """Resolve (xp_multiplier, star_multiplier) for a channel + event.
 
         Resolution order:
@@ -270,7 +280,9 @@ class ConfigCache:
             return list(self._achievements.get(guild_id, []))
 
     def get_series_predecessor(
-        self, series_id: int, current_order: int,
+        self,
+        series_id: int,
+        current_order: int,
     ) -> AchievementTemplate | None:
         """Return the template with the tier just before *current_order*.
 
@@ -287,13 +299,15 @@ class ConfigCache:
         return predecessor
 
     def get_achievement_categories(
-        self, guild_id: int,
+        self,
+        guild_id: int,
     ) -> list[AchievementCategory]:
         with self._lock:
             return list(self._achievement_categories.get(guild_id, []))
 
     def get_achievement_rarities(
-        self, guild_id: int,
+        self,
+        guild_id: int,
     ) -> list[AchievementRarity]:
         with self._lock:
             return list(self._achievement_rarities.get(guild_id, []))
@@ -354,6 +368,11 @@ class ConfigCache:
             self._load_achievements()  # series data lives in templates
         elif table_name == "settings":
             self._load_settings()
+        elif table_name in ("reward_rules", "rule_snapshots"):
+            logger.debug(
+                "NOTIFY for %s (rules loaded per-evaluation, no cache to reload)",
+                table_name,
+            )
         else:
             logger.warning("Unknown table in NOTIFY: %s — ignoring", table_name)
 
@@ -406,7 +425,8 @@ class ConfigCache:
                     cur.execute(f"LISTEN {EVENT_NOTIFY_CHANNEL};")
                     logger.info(
                         "PG LISTEN started on channels '%s', '%s'",
-                        NOTIFY_CHANNEL, EVENT_NOTIFY_CHANNEL,
+                        NOTIFY_CHANNEL,
+                        EVENT_NOTIFY_CHANNEL,
                     )
 
                     # Reset backoff on successful connection
@@ -422,7 +442,9 @@ class ConfigCache:
                             channel = notify.channel
                             payload = notify.payload or ""
                             logger.debug(
-                                "NOTIFY received on '%s': %s", channel, payload,
+                                "NOTIFY received on '%s': %s",
+                                channel,
+                                payload,
                             )
                             try:
                                 if channel == EVENT_NOTIFY_CHANNEL:
@@ -432,7 +454,8 @@ class ConfigCache:
                             except Exception:
                                 logger.exception(
                                     "Error handling NOTIFY on '%s': %s",
-                                    channel, payload,
+                                    channel,
+                                    payload,
                                 )
 
                 except Exception:
@@ -442,8 +465,7 @@ class ConfigCache:
                     # Circuit breaker: stop retrying after max attempts (TD-002)
                     if attempt >= max_reconnect_attempts:
                         logger.critical(
-                            "PG LISTEN exhausted %d retries. "
-                            "Cache invalidation disabled.",
+                            "PG LISTEN exhausted %d retries. Cache invalidation disabled.",
                             max_reconnect_attempts,
                         )
                         self._listener_failed = True
@@ -453,9 +475,10 @@ class ConfigCache:
                     jitter = random.uniform(0, backoff * 0.5)
                     wait = backoff + jitter
                     logger.exception(
-                        "PG LISTEN connection lost (attempt %d/%d). "
-                        "Reconnecting in %.1fs…",
-                        attempt, max_reconnect_attempts, wait,
+                        "PG LISTEN connection lost (attempt %d/%d). Reconnecting in %.1fs…",
+                        attempt,
+                        max_reconnect_attempts,
+                        wait,
                     )
                     # Interruptible sleep: exits early on shutdown signal
                     if self._shutdown_event.wait(timeout=wait):
@@ -465,7 +488,10 @@ class ConfigCache:
                         try:
                             conn.close()
                         except Exception:
-                            pass
+                            logger.debug(
+                                "Failed to close PG listener connection",
+                                exc_info=True,
+                            )
 
         thread = threading.Thread(target=_listen_thread, daemon=True, name="pg-notify-listener")
         self._listener_thread = thread
@@ -515,7 +541,8 @@ class ConfigCache:
         loop = self._event_loop
         if loop is None or loop.is_closed():
             logger.warning(
-                "Cannot dispatch event '%s' — no event loop available", event_type,
+                "Cannot dispatch event '%s' — no event loop available",
+                event_type,
             )
             return
 

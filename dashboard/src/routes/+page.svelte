@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { api, type Metrics, type RecentAchievement, type LeaderboardUser, type ActivityEvent, type PageLayout, type CardConfig } from '$lib/api';
+	import { api, type Metrics, type RecentAchievement, type LeaderboardUser, type AnonymousLeaderboardUser, type ActivityEvent, type PageLayout, type CardConfig } from '$lib/api';
 	import HeroHeader from '$lib/components/HeroHeader.svelte';
 	import MetricCard from '$lib/components/MetricCard.svelte';
 	import Avatar from '$lib/components/Avatar.svelte';
@@ -17,7 +17,8 @@
 	import { RANK_MEDALS } from '$lib/constants';
 
 	let metrics = $state<Metrics | null>(null);
-	let topUsers = $state<LeaderboardUser[]>([]);
+	let topUsers = $state<(LeaderboardUser | AnonymousLeaderboardUser)[]>([]);
+	let leaderboardAuthenticated = $state(false);
 	let recentAchievements = $state<RecentAchievement[]>([]);
 	let recentEvents = $state<ActivityEvent[]>([]);
 	let layout = $state<PageLayout | null>(null);
@@ -36,7 +37,9 @@
 				api.getLayout('dashboard').catch(() => null),
 			]);
 			metrics = m;
-			topUsers = (lb as any)?.users ?? [];
+			const lbRes = lb as any;
+			topUsers = lbRes?.users ?? [];
+			leaderboardAuthenticated = lbRes?.authenticated ?? false;
 			recentAchievements = (ach as any)?.recent ?? [];
 			recentEvents = (act as { events: ActivityEvent[] }).events || [];
 			layout = lay;
@@ -165,7 +168,16 @@
 		return map[key] ?? 0;
 	}
 
-	const champion = $derived(topUsers.length > 0 ? topUsers[0] : null);
+	/** Type guard: does this user entry have PII fields (authenticated response)? */
+	function isFullUser(u: LeaderboardUser | AnonymousLeaderboardUser): u is LeaderboardUser {
+		return 'discord_name' in u;
+	}
+
+	const champion = $derived(
+		topUsers.length > 0 && leaderboardAuthenticated && isFullUser(topUsers[0])
+			? topUsers[0]
+			: null
+	);
 </script>
 
 <svelte:head>
@@ -261,6 +273,32 @@
 									description="Invite Synapse to your server to start seeing activity!"
 									variant="hero"
 								/>
+							{:else if !leaderboardAuthenticated}
+								<!-- Anonymous: show rank + value only -->
+								<div class="space-y-2">
+									{#each topUsers as user, i}
+										<div class="flex items-center gap-3 p-3 rounded-lg bg-surface-200/50">
+											<span class="w-6 text-center text-sm font-bold text-lg">
+												{i < 3 ? RANK_MEDALS[i] : `#${i + 1}`}
+											</span>
+											<div class="flex-shrink-0 w-9 h-9 rounded-full bg-surface-300 flex items-center justify-center">
+												<span class="text-zinc-500 text-xs">?</span>
+											</div>
+											<div class="flex-1 min-w-0">
+												<p class="text-sm font-medium text-zinc-400">Member #{i + 1}</p>
+												<div class="flex items-center gap-2 mt-0.5">
+													<span class="text-xs text-zinc-500">Lvl {user.level}</span>
+													<div class="flex-1 max-w-20">
+														<ProgressBar value={user.xp_progress} height={4} />
+													</div>
+												</div>
+											</div>
+											<div class="text-right">
+												<p class="text-sm font-bold text-brand-400">{fmt(user.xp)} {currency.primary}</p>
+											</div>
+										</div>
+									{/each}
+								</div>
 							{:else}
 								<!-- Champion spotlight -->
 								{#if champion}
@@ -295,26 +333,27 @@
 								<!-- Rest of top members -->
 								<div class="space-y-2">
 									{#each topUsers.slice(1) as user, i}
+										{@const u = user as LeaderboardUser}
 										<div class="flex items-center gap-3 p-3 rounded-lg bg-surface-200/50 hover:bg-surface-200 transition-all hover:scale-[1.01] group">
 											<span class="w-6 text-center text-sm font-bold text-lg">
 												{RANK_MEDALS[i + 1]}
 											</span>
 											<div class="group-hover:scale-105 transition-transform">
-												<Avatar src={user.avatar_url} size={36} />
+												<Avatar src={u.avatar_url} size={36} />
 											</div>
 											<div class="flex-1 min-w-0">
-												<p class="text-sm font-medium text-zinc-200 truncate group-hover:text-white transition-colors">{user.discord_name}</p>
+												<p class="text-sm font-medium text-zinc-200 truncate group-hover:text-white transition-colors">{u.discord_name}</p>
 												<div class="flex items-center gap-2 mt-0.5">
-													<span class="text-xs text-zinc-500">Lvl {user.level}</span>
+													<span class="text-xs text-zinc-500">Lvl {u.level}</span>
 													<div class="flex-1 max-w-20">
-														<ProgressBar value={user.xp_progress} height={4} />
+														<ProgressBar value={u.xp_progress} height={4} />
 													</div>
 												</div>
 											</div>
 											<div class="text-right">
-												<p class="text-sm font-bold text-brand-400">{fmt(user.xp)} {currency.primary}</p>
-												{#if user.gold > 0}
-													<p class="text-xs text-gold-400">{fmt(user.gold)} Gold</p>
+												<p class="text-sm font-bold text-brand-400">{fmt(u.xp)} {currency.primary}</p>
+												{#if u.gold > 0}
+													<p class="text-xs text-gold-400">{fmt(u.gold)} Gold</p>
 												{/if}
 											</div>
 										</div>

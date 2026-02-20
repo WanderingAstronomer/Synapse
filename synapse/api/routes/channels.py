@@ -78,7 +78,9 @@ def upsert_channel_default(
 ):
     """Create or update a channel type default rule."""
     if body.channel_type not in VALID_CHANNEL_TYPES:
-        raise HTTPException(400, f"Invalid channel_type. Must be one of: {sorted(VALID_CHANNEL_TYPES)}")
+        raise HTTPException(
+            400, f"Invalid channel_type. Must be one of: {sorted(VALID_CHANNEL_TYPES)}"
+        )
     row = admin_service.upsert_type_default(
         engine,
         guild_id=cfg.guild_id,
@@ -203,7 +205,9 @@ def list_channels(
                 "id": str(ch.id),
                 "name": ch.name,
                 "type": ch.type,
-                "discord_category_id": str(ch.discord_category_id) if ch.discord_category_id else None,
+                "discord_category_id": str(ch.discord_category_id)
+                if ch.discord_category_id
+                else None,
                 "discord_category_name": ch.discord_category_name,
                 "position": ch.position,
             }
@@ -225,10 +229,13 @@ def sync_channels(
 
     snap_row = session.get(Setting, "guild.snapshot")
     if not snap_row or not snap_row.value_json:
-        raise HTTPException(404, "No guild snapshot found. Run bootstrap or wait for bot to connect.")
+        raise HTTPException(
+            404, "No guild snapshot found. Run bootstrap or wait for bot to connect."
+        )
 
     try:
         from synapse.services.setup_service import GuildSnapshot
+
         snapshot = GuildSnapshot.from_json(snap_row.value_json)
     except Exception:
         raise HTTPException(500, "Failed to parse guild snapshot.")

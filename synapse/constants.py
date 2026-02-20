@@ -18,11 +18,11 @@ if TYPE_CHECKING:
 # Rarity presentation (used by bot embeds, announcement service)
 # ---------------------------------------------------------------------------
 RARITY_EMOJI: dict[str, str] = {
-    "common": "\u26aa",        # ⚪
+    "common": "\u26aa",  # ⚪
     "uncommon": "\U0001f7e2",  # 🟢
-    "rare": "\U0001f535",      # 🔵
-    "epic": "\U0001f7e3",      # 🟣
-    "legendary": "\U0001f7e1", # 🟡
+    "rare": "\U0001f535",  # 🔵
+    "epic": "\U0001f7e3",  # 🟣
+    "legendary": "\U0001f7e1",  # 🟡
 }
 
 RANK_BADGES: list[str] = ["\U0001f947", "\U0001f948", "\U0001f949"]  # 🥇🥈🥉
@@ -47,14 +47,20 @@ def xp_for_level(level: int, cache: ConfigCache | None = None) -> int:
     else:
         base = 100
         factor = 1.25
-    return int(base * (factor ** level))
+    return int(base * (factor**level))
+
 
 # ---------------------------------------------------------------------------
 # Layout Service Allow Lists
 # ---------------------------------------------------------------------------
 ALLOWED_CARD_FIELDS: set[str] = {
-    "card_type", "position", "grid_span", "title",
-    "subtitle", "config_json", "visible",
+    "card_type",
+    "position",
+    "grid_span",
+    "title",
+    "subtitle",
+    "config_json",
+    "visible",
 }
 
 
@@ -62,6 +68,7 @@ ALLOWED_CARD_FIELDS: set[str] = {
 # Text processing helpers
 # ---------------------------------------------------------------------------
 _EMOJI_REGEX = re.compile(r"<a?:[a-zA-Z0-9_]+:[0-9]+>|(?<!\d):[a-zA-Z0-9_]+:(?!\d)")
+
 
 def count_emojis(text: str) -> int:
     """Count custom emojis (<:name:id>) and shortcodes (:smile:) in text.

@@ -61,8 +61,7 @@ def main() -> None:
     token = os.getenv("DISCORD_TOKEN")
     if not token or token == "your-discord-bot-token-here":
         logger.critical(
-            "DISCORD_TOKEN is not set.  "
-            "Copy .env.example → .env and paste your bot token."
+            "DISCORD_TOKEN is not set.  Copy .env.example → .env and paste your bot token."
         )
         sys.exit(1)
 

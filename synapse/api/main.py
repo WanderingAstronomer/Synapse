@@ -9,6 +9,7 @@ Run with::
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -21,11 +22,15 @@ from starlette.staticfiles import StaticFiles
 load_dotenv()
 
 from synapse.api.auth import router as auth_router  # noqa: E402
-from synapse.api.deps import get_engine  # noqa: E402
-from synapse.api.rate_limit import configure_rate_limiter  # noqa: E402
+from synapse.api.deps import get_config, get_engine  # noqa: E402
+from synapse.api.rate_limit import configure_rate_limiter, get_rate_limiter  # noqa: E402
 from synapse.api.routes.admin import router as admin_router  # noqa: E402
+from synapse.api.routes.cutover import router as cutover_router  # noqa: E402
 from synapse.api.routes.event_lake import router as event_lake_router  # noqa: E402
 from synapse.api.routes.layouts import router as layouts_router  # noqa: E402
+from synapse.api.routes.marketplace import shop_router  # noqa: E402
+from synapse.api.routes.member import router as member_router  # noqa: E402
+from synapse.api.routes.observability import router as observability_router  # noqa: E402
 from synapse.api.routes.public import router as public_router  # noqa: E402
 from synapse.services.log_buffer import install_handler  # noqa: E402
 from synapse.services.upload_service import UPLOAD_DIR, ensure_upload_dir  # noqa: E402
@@ -37,8 +42,8 @@ def _cors_origins() -> list[str]:
     """Resolve allowed CORS origins from env with safe defaults.
 
     Priority:
-      1) CORS_ALLOW_ORIGINS (comma-separated)
-      2) FRONTEND_URL (single origin)
+    1) CORS_ALLOW_ORIGINS (comma-separated)
+    2) FRONTEND_URL (single origin)
     """
     raw = os.getenv("CORS_ALLOW_ORIGINS", "").strip()
     if raw:
@@ -61,12 +66,52 @@ async def lifespan(app: FastAPI):
 
     # Ensure upload directory exists
     ensure_upload_dir()
+    app.mount(
+        "/api/uploads",
+        StaticFiles(directory=str(UPLOAD_DIR)),
+        name="uploads",
+    )
 
     engine = get_engine()
-    configure_rate_limiter(engine=engine)
-    logger.info("Synapse API started — engine ready (%s)", engine.url.database)
-    yield
-    logger.info("Synapse API shutting down")
+    cfg = get_config()
+
+    configure_rate_limiter(
+        engine=engine,
+        max_requests=cfg.admin_rate_limit,
+        window_seconds=cfg.admin_rate_window,
+    )
+    logger.info(
+        "Synapse API started — engine ready (%s) | Admin Rate Limit: %d/%ds",
+        engine.url.database,
+        cfg.admin_rate_limit,
+        cfg.admin_rate_window,
+    )
+
+    # Start background rate limit janitor
+    async def _rate_limit_janitor():
+        limiter = get_rate_limiter()
+        while True:
+            try:
+                await asyncio.to_thread(limiter.cleanup)
+                # Sleep for the window duration (cleanup doesn't need to be faster)
+                await asyncio.sleep(cfg.admin_rate_window)
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                logger.exception("Rate limit janitor failed")
+                await asyncio.sleep(60)
+
+    janitor_task = asyncio.create_task(_rate_limit_janitor())
+
+    try:
+        yield
+    finally:
+        janitor_task.cancel()
+        try:
+            await janitor_task
+        except asyncio.CancelledError:
+            pass
+        logger.info("Synapse API shutting down")
 
 
 app = FastAPI(
@@ -88,22 +133,17 @@ app.add_middleware(
 app.include_router(auth_router, prefix="/api")
 app.include_router(public_router, prefix="/api")
 app.include_router(admin_router, prefix="/api")
+app.include_router(cutover_router, prefix="/api")
 app.include_router(event_lake_router, prefix="/api")
 app.include_router(layouts_router, prefix="/api")
+app.include_router(member_router, prefix="/api")
+app.include_router(observability_router, prefix="/api")
+app.include_router(shop_router, prefix="/api")
 
 
 @app.get("/api/health")
 def health():
     return {"status": "ok"}
-
-
-# Serve uploaded files as static assets with caching headers
-if UPLOAD_DIR.exists():
-    app.mount(
-        "/api/uploads",
-        StaticFiles(directory=str(UPLOAD_DIR)),
-        name="uploads",
-    )
 
 
 @app.get("/api/health/bot")

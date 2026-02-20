@@ -36,6 +36,7 @@ from synapse.database.models import (
 )
 from synapse.services.channel_service import sync_channels_from_snapshot
 from synapse.services.layout_service import seed_default_layouts
+from synapse.services.settings_service import get_setting_value
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +56,7 @@ BOOTSTRAP_VERSION = 1
 @dataclass
 class ChannelInfo:
     """Flattened representation of a guild channel."""
+
     id: int
     name: str
     type: str  # "text", "voice", "category", "forum", "stage"
@@ -65,6 +67,7 @@ class ChannelInfo:
 @dataclass
 class GuildSnapshot:
     """What the bot writes to the DB on connect."""
+
     guild_id: int
     guild_name: str
     channels: list[ChannelInfo] = field(default_factory=list)
@@ -72,22 +75,24 @@ class GuildSnapshot:
     captured_at: str = ""
 
     def to_json(self) -> str:
-        return json.dumps({
-            "guild_id": self.guild_id,
-            "guild_name": self.guild_name,
-            "channels": [
-                {
-                    "id": ch.id,
-                    "name": ch.name,
-                    "type": ch.type,
-                    "category_id": ch.category_id,
-                    "category_name": ch.category_name,
-                }
-                for ch in self.channels
-            ],
-            "afk_channel_id": self.afk_channel_id,
-            "captured_at": self.captured_at or datetime.now(UTC).isoformat(),
-        })
+        return json.dumps(
+            {
+                "guild_id": self.guild_id,
+                "guild_name": self.guild_name,
+                "channels": [
+                    {
+                        "id": ch.id,
+                        "name": ch.name,
+                        "type": ch.type,
+                        "category_id": ch.category_id,
+                        "category_name": ch.category_name,
+                    }
+                    for ch in self.channels
+                ],
+                "afk_channel_id": self.afk_channel_id,
+                "captured_at": self.captured_at or datetime.now(UTC).isoformat(),
+            }
+        )
 
     @classmethod
     def from_json(cls, raw: str) -> GuildSnapshot:
@@ -114,6 +119,7 @@ class GuildSnapshot:
 @dataclass
 class BootstrapResult:
     """Structured result from a bootstrap run."""
+
     success: bool = True
     channels_synced: int = 0
     season_created: bool = False
@@ -127,9 +133,9 @@ class BootstrapResult:
 def get_setup_status(engine) -> dict:
     """Return the current setup state as a dict for the API."""
     with Session(engine) as session:
-        initialized = _get_setting(session, SETUP_INITIALIZED_KEY, False)
-        version = _get_setting(session, BOOTSTRAP_VERSION_KEY, None)
-        timestamp = _get_setting(session, BOOTSTRAP_TIMESTAMP_KEY, None)
+        initialized = get_setting_value(session, SETUP_INITIALIZED_KEY, False)
+        version = get_setting_value(session, BOOTSTRAP_VERSION_KEY, None)
+        timestamp = get_setting_value(session, BOOTSTRAP_TIMESTAMP_KEY, None)
         snapshot_raw = _get_raw_setting(session, GUILD_SNAPSHOT_KEY)
 
         has_snapshot = snapshot_raw is not None
@@ -161,12 +167,18 @@ def get_setup_status(engine) -> dict:
 def save_guild_snapshot(engine, snapshot: GuildSnapshot) -> None:
     """Persist the guild snapshot to the Setting table (called by bot)."""
     with Session(engine) as session:
-        _upsert_setting(session, GUILD_SNAPSHOT_KEY, snapshot.to_json(),
-                        category="setup", description="Guild channel snapshot from bot")
+        _upsert_setting(
+            session,
+            GUILD_SNAPSHOT_KEY,
+            snapshot.to_json(),
+            category="setup",
+            description="Guild channel snapshot from bot",
+        )
         session.commit()
     logger.info(
         "Guild snapshot saved: %d channels for guild %d",
-        len(snapshot.channels), snapshot.guild_id,
+        len(snapshot.channels),
+        snapshot.guild_id,
     )
 
 
@@ -180,8 +192,13 @@ def save_bot_heartbeat(engine) -> None:
     """Write the current UTC timestamp as a heartbeat (called every ~30s by the bot)."""
     ts = datetime.now(UTC).isoformat()
     with Session(engine) as session:
-        _upsert_setting(session, BOT_HEARTBEAT_KEY, json.dumps(ts),
-                        category="setup", description="Bot last-alive heartbeat")
+        _upsert_setting(
+            session,
+            BOT_HEARTBEAT_KEY,
+            json.dumps(ts),
+            category="setup",
+            description="Bot last-alive heartbeat",
+        )
         session.commit()
 
 
@@ -275,20 +292,24 @@ def bootstrap_guild(
         # Step 3: Ensure a default season exists
         # ------------------------------------------------------------------
         existing_season = session.scalar(
-            select(Season.id).where(
+            select(Season.id)
+            .where(
                 Season.guild_id == guild_id,
                 Season.active.is_(True),
-            ).limit(1)
+            )
+            .limit(1)
         )
         if not existing_season:
             now = datetime.now(UTC)
-            session.add(Season(
-                guild_id=guild_id,
-                name="Season 1",
-                starts_at=now,
-                ends_at=now + timedelta(days=120),
-                active=True,
-            ))
+            session.add(
+                Season(
+                    guild_id=guild_id,
+                    name="Season 1",
+                    starts_at=now,
+                    ends_at=now + timedelta(days=120),
+                    active=True,
+                )
+            )
             result.season_created = True
             logger.info("Created default season for guild %d", guild_id)
 
@@ -305,24 +326,33 @@ def bootstrap_guild(
         # Step 5: Mark setup as initialized
         # ------------------------------------------------------------------
         _upsert_setting(
-            session, SETUP_INITIALIZED_KEY, json.dumps(True),
-            "setup", "Whether first-run bootstrap has completed",
+            session,
+            SETUP_INITIALIZED_KEY,
+            json.dumps(True),
+            "setup",
+            "Whether first-run bootstrap has completed",
         )
         _upsert_setting(
-            session, BOOTSTRAP_VERSION_KEY, json.dumps(BOOTSTRAP_VERSION),
-            "setup", "Bootstrap logic version",
+            session,
+            BOOTSTRAP_VERSION_KEY,
+            json.dumps(BOOTSTRAP_VERSION),
+            "setup",
+            "Bootstrap logic version",
         )
         _upsert_setting(
-            session, BOOTSTRAP_TIMESTAMP_KEY,
+            session,
+            BOOTSTRAP_TIMESTAMP_KEY,
             json.dumps(datetime.now(UTC).isoformat()),
-            "setup", "When bootstrap last ran",
+            "setup",
+            "When bootstrap last ran",
         )
 
         session.commit()
 
     logger.info(
         "Bootstrap complete: %d channels synced, season=%s",
-        result.channels_synced, result.season_created,
+        result.channels_synced,
+        result.season_created,
     )
     return result
 
@@ -330,17 +360,6 @@ def bootstrap_guild(
 # ---------------------------------------------------------------------------
 # Internals
 # ---------------------------------------------------------------------------
-def _get_setting(session: Session, key: str, default=None):
-    """Read a setting value, JSON-decoded."""
-    row = session.get(Setting, key)
-    if row is None:
-        return default
-    try:
-        return json.loads(row.value_json)
-    except (json.JSONDecodeError, TypeError):
-        return row.value_json
-
-
 def _get_raw_setting(session: Session, key: str) -> str | None:
     """Read a setting's raw ``value_json`` string without decoding."""
     row = session.get(Setting, key)
@@ -361,10 +380,11 @@ def _upsert_setting(
         if description:
             row.description = description
     else:
-        session.add(Setting(
-            key=key,
-            value_json=value_json,
-            category=category,
-            description=description,
-        ))
-
+        session.add(
+            Setting(
+                key=key,
+                value_json=value_json,
+                category=category,
+                description=description,
+            )
+        )
